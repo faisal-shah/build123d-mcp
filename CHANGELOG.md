@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.3.13
+
+### Features
+
+- **`build123d://quickref` MCP resource**: exposes a plain-text quick reference for the build123d API so LLM clients can read accurate syntax before calling `execute()`. Every runnable example is tested automatically to ensure the quickref stays accurate as the codebase evolves.
+- **`start-cad-session` prompt**: primes a design session with the task description plus step-by-step workflow reminders.
+- **`build123d://session` MCP resource**: read-only JSON resource exposing live session state — `current_shape` diagnostics, named objects, snapshots, and user-defined variables. Clients can read session state without spending a tool-call round-trip on `session_state()`.
+- **`build123d://bd_warehouse` MCP resource**: introspects the installed `bd_warehouse` package and returns a plain-text catalogue of all available parametric components (bearings, fasteners, flanges, gears, OpenBuilds parts, pipes, sprockets, threads). Each entry shows the class name, description, constructor signature, and for size-standardised classes the available types and sizes.
+
+---
+
 ## v0.3.12
 
 ### Features
