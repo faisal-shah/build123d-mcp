@@ -107,7 +107,7 @@ dependencies = [
 
 [[package]]
 name = "build123d-mcp"
-version = "0.3.20.dev0"
+version = "0.3.21.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "bd-warehouse" },
