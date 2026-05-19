@@ -60,10 +60,13 @@ class Session:
                     without annotation metadata.
                 name: object name for the session registry. Defaults to
                     label_str (when available) or "annotation".
-                label: explicit label string. Use this with vanilla
-                    ExtensionLine/DimensionLine — they consume the label
-                    constructor argument without exposing it on the shape.
-                    Ignored if result already exposes label_str.
+                label: explicit label string override. Use when the dim has a
+                    custom label that differs from the measured length (e.g.
+                    ExtensionLine(..., label="40") on a 20 mm segment). If
+                    omitted for vanilla ExtensionLine/DimensionLine, the label
+                    is auto-derived from the measured dimension length. To
+                    avoid manual duplication use dim_linear() from
+                    build123d_drafting, which stores the exact label.
             """
             if name is None:
                 name = getattr(result, "label_str", None) or "annotation"
@@ -80,8 +83,14 @@ class Session:
                 dim = getattr(result, "dimension", None)
                 if dim is not None:
                     meta["measured_length"] = dim
-            if label is not None and "label_str" not in meta:
-                meta["label_str"] = label
+            if "label_str" not in meta:
+                if label is not None:
+                    meta["label_str"] = label
+                elif "measured_length" in meta:
+                    # build123d does not expose the constructor label after
+                    # construction (.label is always ''); derive from length.
+                    # Use dim_linear() from build123d_drafting for custom labels.
+                    meta["label_str"] = str(round(meta["measured_length"], 1))
             drawing_annotations[name] = meta
             shape = getattr(result, "shape", result)
             objects[name] = shape

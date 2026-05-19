@@ -230,6 +230,29 @@ def render_drawing(svg_path: str, width: int = 1200, save_to: str = "") -> list:
 
 
 @mcp.tool()
+def save_drawing_annotations(svg_path: str) -> str:
+    """Write a .dims.json sidecar file alongside an SVG with label metadata.
+
+    build123d renders Text as filled glyph paths, not <text> SVG elements, so
+    label strings are irrecoverable from a finished SVG. Call this tool after
+    completing a drawing (annotate all dims/leaders with annotate()) and before
+    or after exporting the SVG. The sidecar is read automatically by
+    inspect_drawing(svg_path=...) to restore annotation content.
+
+    Workflow:
+        1. Build your drawing with dim_linear / leader / annotate()
+        2. Export SVG:  execute("exporter.write('drawing.svg')")
+        3. Save metadata: save_drawing_annotations("drawing.svg")
+        4. Inspect later: inspect_drawing(svg_path="drawing.svg")
+           → includes full annotations dict from the sidecar
+
+    Args:
+        svg_path: path to the SVG file (sidecar written as <svg_path>.dims.json).
+    """
+    return _session.save_drawing_annotations(svg_path)
+
+
+@mcp.tool()
 def search_library(query: str = "") -> str:
     """Search the part library. query: keywords matched against name, description, tags, category (empty returns all). Returns name, category, description, tags, and full parameter specs including types, defaults, and descriptions."""
     if not _has_library:

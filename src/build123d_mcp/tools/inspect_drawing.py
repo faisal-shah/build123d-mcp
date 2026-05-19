@@ -75,6 +75,18 @@ def _inspect_svg(svg_path: str) -> str:
                 "fill": elem.get("fill"),
             })
 
+    # Sidecar: read <svg_path>.dims.json written by save_drawing_annotations().
+    # build123d renders Text as filled glyph paths so <text> elements are absent;
+    # the sidecar restores label content and measured-length metadata.
+    sidecar_path = os.path.splitext(svg_path)[0] + ".dims.json"
+    annotations: dict = {}
+    if os.path.isfile(sidecar_path):
+        try:
+            with open(sidecar_path) as f:
+                annotations = json.load(f)
+        except Exception:
+            pass
+
     return json.dumps({
         "mode": "svg",
         "path": svg_path,
@@ -82,6 +94,11 @@ def _inspect_svg(svg_path: str) -> str:
         "layers": layers,
         "text": text_entries,
         "counts": counts,
+        "annotations": annotations,
+        "annotations_note": (
+            "annotations loaded from sidecar" if annotations
+            else "no sidecar found — call save_drawing_annotations(svg_path) after building"
+        ),
     }, indent=2)
 
 

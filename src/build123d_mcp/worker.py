@@ -175,6 +175,10 @@ def _dispatch(session: Any, op: str, args: dict, library_index: Any) -> Any:
             args.get("save_to", ""),
         )
 
+    if op == "save_drawing_annotations":
+        from build123d_mcp.tools.save_drawing_annotations import save_drawing_annotations
+        return save_drawing_annotations(session, args["svg_path"])
+
     raise ValueError(f"Unknown operation: '{op}'")
 
 
@@ -402,6 +406,13 @@ class WorkerSession:
             "render_drawing",
             {"svg_path": svg_path, "width": width, "save_to": save_to},
             self._RENDER_TIMEOUT,
+        )
+
+    def save_drawing_annotations(self, svg_path: str) -> str:
+        return self._call(
+            "save_drawing_annotations",
+            {"svg_path": svg_path},
+            self._SHORT_TIMEOUT,
         )
 
     def search_library(self, query: str = "") -> str:

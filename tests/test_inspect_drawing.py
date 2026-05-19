@@ -113,9 +113,10 @@ annotate(d, "len_dim", label="25")
         assert abs(ann["measured_length"] - 25.0) < 0.01
         assert ann["type"] == "DimensionLine"
 
-    def test_annotate_vanilla_extension_line_without_label_still_captures_length(self, session):
-        """Without an explicit label= kwarg, measured_length should still be
-        captured from .dimension (label_str just won't be present)."""
+    def test_annotate_vanilla_extension_line_without_label_auto_derives_from_length(self, session):
+        """Without an explicit label= kwarg, label_str is auto-derived from
+        the measured dimension length (build123d doesn't expose the constructor
+        label on the shape object)."""
         session.execute("""
 from build123d import ExtensionLine, Draft
 draft = Draft(font_size=2.5, decimal_precision=1, arrow_length=1.0, line_width=0.1)
@@ -126,7 +127,8 @@ annotate(w, "no_label_dim")
         assert ann is not None
         assert "measured_length" in ann
         assert abs(ann["measured_length"] - 30.0) < 0.01
-        assert "label_str" not in ann
+        # Auto-derived label from measured_length rounded to 1 decimal place
+        assert ann["label_str"] == "30.0"
 
     def test_annotate_label_kwarg_ignored_when_result_has_label_str(self, session):
         """For DimResult (which already exposes label_str), an explicit
@@ -285,3 +287,107 @@ annotate(w, "width")
             assert ann["label_str"] == "20"
         finally:
             ws._kill_worker()
+
+
+# ---------------------------------------------------------------------------
+# annotate() label auto-derivation (#115)
+# ---------------------------------------------------------------------------
+
+class TestAnnotateLabelFallback:
+    def test_vanilla_extension_line_gets_auto_label(self, session):
+        session.execute("""
+from build123d import *
+from build123d import Draft, ExtensionLine, Mode
+draft = Draft(font_size=2.5, decimal_precision=1)
+el = ExtensionLine(border=[(-10, 0, 0), (10, 0, 0)], offset=8, draft=draft, label="20", mode=Mode.PRIVATE)
+annotate(el, "dim")
+""")
+        ann = session.drawing_annotations.get("dim")
+        assert ann is not None
+        assert "label_str" in ann
+        # Auto-derived from measured length (20.0), not the custom "20" label
+        assert ann["label_str"] == "20.0"
+        assert abs(ann["measured_length"] - 20.0) < 0.01
+
+    def test_explicit_label_kwarg_wins(self, session):
+        session.execute("""
+from build123d import *
+from build123d import Draft, ExtensionLine, Mode
+draft = Draft(font_size=2.5, decimal_precision=1)
+el = ExtensionLine(border=[(-10, 0, 0), (10, 0, 0)], offset=8, draft=draft, label="40", mode=Mode.PRIVATE)
+annotate(el, "dim", label="40")
+""")
+        ann = session.drawing_annotations.get("dim")
+        assert ann is not None
+        assert ann["label_str"] == "40"
+
+    def test_dim_result_label_preserved_exactly(self, session):
+        session.execute("""
+from build123d import *
+from build123d import Draft
+from build123d_drafting import dim_linear
+draft = Draft(font_size=2.5, decimal_precision=1)
+w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="custom")
+annotate(w, "width")
+""")
+        ann = session.drawing_annotations.get("width")
+        assert ann is not None
+        assert ann["label_str"] == "custom"
+
+
+# ---------------------------------------------------------------------------
+# save_drawing_annotations / sidecar (#116)
+# ---------------------------------------------------------------------------
+
+class TestSaveDrawingAnnotations:
+    def _run(self, session, objects=""):
+        from build123d_mcp.tools.inspect_drawing import inspect_drawing
+        return json.loads(inspect_drawing(session, objects))
+
+    def test_save_writes_dims_json(self, session, tmp_path):
+        from build123d_mcp.tools.save_drawing_annotations import save_drawing_annotations
+        session.execute("""
+from build123d import *
+from build123d import Draft
+from build123d_drafting import dim_linear
+draft = Draft(font_size=2.5, decimal_precision=1)
+w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+annotate(w, "width")
+""")
+        svg_path = str(tmp_path / "drawing.svg")
+        result = save_drawing_annotations(session, svg_path)
+        sidecar = tmp_path / "drawing.dims.json"
+        assert sidecar.exists()
+        assert "1 annotation" in result
+
+    def test_sidecar_loaded_by_inspect_svg_mode(self, session, tmp_path):
+        from build123d_mcp.tools.save_drawing_annotations import save_drawing_annotations
+        from build123d_mcp.tools.inspect_drawing import _inspect_svg
+        session.execute("""
+from build123d import *
+from build123d import Draft
+from build123d_drafting import dim_linear
+draft = Draft(font_size=2.5, decimal_precision=1)
+w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+annotate(w, "width")
+""")
+        svg_path = str(tmp_path / "drawing.svg")
+        # Write a minimal SVG so the file exists
+        (tmp_path / "drawing.svg").write_text(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"/>'
+        )
+        save_drawing_annotations(session, svg_path)
+
+        result = json.loads(_inspect_svg(svg_path))
+        assert result["mode"] == "svg"
+        assert "width" in result["annotations"]
+        assert result["annotations"]["width"]["label_str"] == "20"
+        assert "loaded from sidecar" in result["annotations_note"]
+
+    def test_no_sidecar_gives_guidance_note(self, tmp_path):
+        from build123d_mcp.tools.inspect_drawing import _inspect_svg
+        svg_path = tmp_path / "bare.svg"
+        svg_path.write_text('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"/>')
+        result = json.loads(_inspect_svg(str(svg_path)))
+        assert result["annotations"] == {}
+        assert "save_drawing_annotations" in result["annotations_note"]
