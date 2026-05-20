@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.3.24
+
+### Bug fixes
+
+- **`view_axes` no longer times out on `look_at=[0,0,0]`** (#114, #122): `tools/view_axes.py` was importing `build123d_drafting`, which loads OCC symbols at module level. On a fresh worker subprocess (before any `execute()` call), the cold-start exceeded the 10 s `SHORT_TIMEOUT`. Fixed by inlining the pure Python math directly — no OCC import, no timeout.
+- **`annotate()` no longer produces false-negative lint results** (#119, #121): calling `annotate(vanilla_el, "name")` without `label=` was setting `label_str = str(round(measured_length, 1))`, making lint always see label == measured regardless of what label the `ExtensionLine` was built with. `label_str` is now left absent when we can't extract it, so lint skips the check rather than falsely approving a drawing with an axis-swap bug. Pass `label=` explicitly or use `dim_linear()` for full lint coverage.
+- **`leader()` line no longer strikes through label text** (#120): the horizontal shelf was extended by `gap + text_w + gap`, making it run through the full width of the label. Fixed in `build123d-drafting-helpers` 0.1.2: shelf length is now `gap` (a short stub ending where the text starts).
+
+### Documentation
+
+- **Default system prompt steers AIs toward `build123d.drafting`**: added an explicit 2D drawings section prohibiting `reportlab`/`matplotlib` and directing AIs to read `build123d://drafting` first; added an MCP resources table so AIs know all five resources exist without being pushed.
+
+---
+
 ## v0.3.23
 
 - **`lint_drawing(svg_path=…)` now uses the sidecar** (#118): when a `.dims.json` sidecar exists alongside the SVG (written by `save_drawing_annotations()`), the label-vs-measured and leader checks run against the sidecar annotations — the same axis-swap detection as session mode. Makes `save_drawing_annotations` + `lint_drawing(svg_path=…)` a complete out-of-band lint flow usable from CI without a live session.
