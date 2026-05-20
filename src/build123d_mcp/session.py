@@ -13,7 +13,8 @@ from build123d_mcp.security import (
 
 
 # Names injected by the session itself — excluded from rollback and new-key detection.
-_INJECTED = frozenset({"__builtins__", "show", "named_face", "annotate"})
+_INJECTED = frozenset({"__builtins__", "show", "named_face", "annotate",
+                       "register_centerline", "set_page"})
 
 
 class Session:
@@ -25,6 +26,7 @@ class Session:
         self.snapshots: dict[str, Any] = {}
         self.last_error_detail: dict[str, Any] | None = None
         self.drawing_annotations: dict[str, Any] = {}
+        self.drawing_page: dict[str, Any] | None = None
         self._inject_builtins()
 
     def _inject_builtins(self) -> None:
@@ -71,7 +73,8 @@ class Session:
                 name = getattr(result, "label_str", None) or "annotation"
             meta: dict[str, Any] = {"type": type(result).__name__}
             # Helper-library duck-typed extraction.
-            for attr in ("label_str", "measured_length", "tip", "elbow"):
+            for attr in ("label_str", "measured_length", "tip", "elbow",
+                         "label_bbox", "dim_level_y"):
                 val = getattr(result, attr, None)
                 if val is not None:
                     meta[attr] = val
@@ -94,8 +97,21 @@ class Session:
                 # absent so lint skips the check rather than falsely approving
                 # a potentially wrong drawing. Pass label= explicitly or use
                 # dim_linear() from build123d_drafting to enable lint.
-            drawing_annotations[name] = meta
+            # Store the dim-line level (the extreme Y away from the part edge)
+            # so lint_drawing can compare levels without false positives from
+            # extension lines that span from Y≈0 to the dim line.
             shape = getattr(result, "shape", result)
+            if "dim_level_y" not in meta:
+                try:
+                    bb = shape.bounding_box()
+                    # Whichever Y extreme is farther from the midpoint is the dim line.
+                    if abs(bb.max.Y) >= abs(bb.min.Y):
+                        meta["dim_level_y"] = bb.max.Y
+                    else:
+                        meta["dim_level_y"] = bb.min.Y
+                except Exception:
+                    pass
+            drawing_annotations[name] = meta
             objects[name] = shape
             session_ref.current_shape = shape
             print(f"Annotated '{name}': {meta.get('label_str', '')}")
@@ -115,6 +131,53 @@ class Session:
                 print(f"Registered '{name}'")
 
         self.namespace["show"] = show
+
+        def set_page(width: float, height: float, margin: float = 5.0) -> None:
+            """Register the drawing page extent for lint_drawing bounds checking.
+
+            After calling set_page(), lint_drawing() will flag any annotation
+            whose bounding box extends past the drawable area (page minus margin).
+
+            Args:
+                width:  page width in mm (e.g. 297 for A4 landscape).
+                height: page height in mm (e.g. 210 for A4 landscape).
+                margin: minimum clear border in mm (default 5). Annotations
+                        must stay within (margin, margin) to (width-margin, height-margin).
+            """
+            session_ref.drawing_page = {
+                "width": width,
+                "height": height,
+                "margin": margin,
+                "min_x": margin,
+                "min_y": margin,
+                "max_x": width - margin,
+                "max_y": height - margin,
+            }
+            print(f"Page set: {width}×{height} mm, margin={margin} mm "
+                  f"(drawable area {width-2*margin}×{height-2*margin} mm)")
+
+        self.namespace["set_page"] = set_page
+
+        def register_centerline(shape: Any, name: str | None = None) -> None:
+            """Register a centerline shape for lint_drawing() overlap detection.
+
+            After calling register_centerline(), lint_drawing() will flag any
+            dimension annotation whose label bbox overlaps this centerline.
+
+            Args:
+                shape: the centerline compound/edge (e.g. from centerline() helper
+                    or Edge.make_line wrapped in Compound).
+                name:  object name for the session registry.
+                    Defaults to "centerline".
+            """
+            if name is None:
+                name = "centerline"
+            drawing_annotations[name] = {"type": "centerline"}
+            objects[name] = shape
+            session_ref.current_shape = shape
+            print(f"Registered centerline '{name}'")
+
+        self.namespace["register_centerline"] = register_centerline
 
         def named_face(shape: Any, name: str) -> Any:
             """Return a face of shape by semantic name: top/bottom/front/back/left/right."""
@@ -409,5 +472,6 @@ class Session:
         self.objects.clear()
         self.snapshots.clear()
         self.drawing_annotations.clear()
+        self.drawing_page = None
         self.last_error_detail = None
         self._inject_builtins()
