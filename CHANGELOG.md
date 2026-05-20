@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.3.25
+
+### Features
+
+- **Annotation overlap detection** (`annotation_overlap` lint check): `lint_drawing()` now flags annotation pairs whose bounding boxes overlap by >0.5 mm in both axes at the same Y level. Uses `dim_level_y` metadata (Y coordinate of the actual dim line, stored by `annotate()`) to skip stacked dims whose extension lines legitimately share an X range — eliminates false positives from witness lines.
+- **Page-bounds detection** (`annotation_out_of_bounds` lint check): `set_page(width, height, margin=5)` registers the drawable area; `lint_drawing()` flags any annotation whose bbox extends past the margin. `session.reset()` clears the page.
+- **Centreline-label overlap detection** (`label_centerline_overlap` lint check): `register_centerline(shape, name)` tags a shape as a centreline; `lint_drawing()` checks whether any dim's label bbox crosses it, using the precise text extent rather than the full annotation bbox. Suggests `label_offset_x` or a leader as fixes.
+- **`label_offset_x` propagated to session**: `annotate()` now extracts `label_bbox` and `dim_level_y` from `DimResult` (set by `build123d-drafting-helpers` ≥ 0.1.3).
+
+### Documentation
+
+- **`build123d://drafting` resource** updated with `place_dims`, `place_labels`, `centerline`, `register_centerline` workflow; centreline-label collision avoidance section.
+- **`default_prompt.md`** adds unmissable `pip install build123d-drafting-helpers` block with `ModuleNotFoundError` guidance; step 3 names placement helpers first.
+
+---
+
 ## v0.3.24
 
 ### Bug fixes
