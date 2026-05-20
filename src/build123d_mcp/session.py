@@ -48,8 +48,8 @@ class Session:
             2. Vanilla build123d.ExtensionLine / DimensionLine — measured
                length is read from the .dimension attribute that build123d
                sets during construction. The label string is NOT stored on
-               the constructed object by build123d, so pass it explicitly
-               via label="..." to have it captured.
+               the constructed object by build123d (gumyr/build123d#1315),
+               so pass it explicitly via label="..." to enable lint.
 
             Stores annotation metadata and also calls show() so the shape
             is visible to render_view.
