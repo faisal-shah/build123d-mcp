@@ -92,7 +92,7 @@ When asked to produce a technical drawing, dimensioned view, or annotated sheet:
 
 1. **Read `build123d://drafting` first, before writing a single line of drawing code.** It contains the complete workflow with tested, working examples.
 2. Project 3D geometry with `project_to_viewport(...)` (built into build123d).
-3. Annotate with `build123d_drafting` helpers: `dim_linear`, `safe_dim_line`, `leader`, `annotate`.
+3. Annotate with `build123d_drafting` helpers: `place_dims` or `place_labels` for automatic offset/label placement; `dim_linear`, `safe_dim_line`, `leader` for individual annotations; `centerline` + `register_centerline` for centrelines.
 4. Compose the sheet with `TechnicalDrawing` from `build123d.drafting` — title block, border, and multi-view layout are all handled for you.
 5. Export to SVG via `export("drawing", format="svg")` or DXF via `format="dxf"`.
 6. Review with `render_view()` — the server's 2D pipeline renders drafting objects natively.
