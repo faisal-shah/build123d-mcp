@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.3.26 — 2026-05-21
+
+### Features
+
+- **`align_check(object_a, object_b, axis, mode)`**: deterministic alignment verification along X/Y/Z — `flush` (signed bbox-face delta), `center` (centroid offset), `clearance` (gap). Returns structured JSON with an `interpretation` field.
+- **`resolve(object_name, selector, label)`**: evaluates a build123d selector against a named object and returns structured JSON including an `@cad[object#label]` reference. Named refs stored in `session.geometry_refs`.
+- **`script(save_to="")`**: exports the session's `execute_history` (all successful `execute()` calls) as a standalone runnable Python file.
+- **`failure_class` in execute() errors**: every error response now includes a stable `failure_class` key (`boolean_fail`, `syntax_error`, `selector_empty`, `fillet_fail`, `timeout`, `import_blocked`, `unknown`) plus a `suggested_fix` hint.
+- **Validation protocol docs**: `default_prompt.md` and `llms.md` updated to codify measure-before-render order, post-assembly clearance check, and source-vs-derived rule.
+
+---
+
 ## v0.3.25
 
 ### Features
