@@ -484,10 +484,53 @@ show(result, "stacked_dims_demo")""",
     ),
 
     Section(
+        label="gdt_symbols",
+        text="""\
+## GD&T: feature control frames, datum features, surface finish marks
+# build123d.drafting ships no GD&T primitives, and the geometric-characteristic
+# glyphs (⌖ ⊥ ∥ ◎ …) and surface-finish ticks are absent from CAD-safe fonts —
+# so build123d-drafting-helpers (>=0.1.7) draws them geometrically. Each helper
+# builds at the origin; move it into place with .shape.moved(loc), and route
+# .lines / .text to separate SVG layers when you need ISO line/fill colours.
+from build123d import *
+from build123d_drafting import (
+    feature_control_frame, datum_feature, surface_finish_mark,
+)
+
+draft = Draft(font_size=2.5, decimal_precision=2)
+
+# Feature control frame -> | ⌖ | ⌀0.5 Ⓜ | A | B | C |
+# characteristic is one of 14 names ("position", "flatness", "perpendicularity",
+# "concentricity", "circular_runout", ...). diameter=True prepends ⌀;
+# modifier="M"/"L"/"P" = MMC/LMC/projected (None = RFS).
+fcf = feature_control_frame(
+    "position", 0.5, datums=("A", "B", "C"),
+    draft=draft, diameter=True, modifier="M",
+)
+
+# Datum feature symbol (filled triangle + framed letter), tip at the origin.
+datum_a = datum_feature("A", draft=draft)
+
+# Surface finish mark with an Ra value, placed at a point (ISO 1302).
+finish = surface_finish_mark("1.6", position=(60, 0, 0), draft=draft)
+
+# In a real drawing, route .lines and .text to coloured ExportSVG layers; here
+# we just compose .shape for a preview.
+result = Compound(children=[
+    fcf.shape,
+    datum_a.shape.moved(Location((40, 0, 0))),
+    finish.shape,
+])
+show(result, "gdt_demo")""",
+    ),
+
+    Section(
         text="""\
 ## Limitations and gaps in build123d.drafting today
 # - No HoleTable class: roll your own via face_inventory + DimensionLine (see above).
-# - No GD&T symbols: surface finish marks, datum triangles, control frames.
+# - GD&T symbols (feature control frames, datum features, surface finish marks)
+#   and an ISO 7200 title block now live in build123d-drafting-helpers — see the
+#   GD&T recipe above; iso_title_block() covers the title block.
 # - No section-view hatching: clip the part with a plane and project the
 #   result, but cross-hatching the cut surface is manual.
 # - No automatic standards selection (ASME Y14.5 vs ISO): the Draft object

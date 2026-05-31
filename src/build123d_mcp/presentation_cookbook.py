@@ -7,7 +7,8 @@ output you put in a chat, doc, or proposal review.
 
 Differs from build123d://drafting:
   drafting     — engineering drawings for fabrication (DXF handoff, tolerance
-                 dims, GD&T, multi-view sheets). Two-colour output.
+                 dims, GD&T feature control frames / datum / surface-finish
+                 symbols, multi-view sheets). Two-colour output.
   presentation — discussion diagrams (per-group colour, filled features,
                  legends, axes, titles). Multi-colour output via ExportSVG
                  layers, run from a script outside the MCP sandbox.
@@ -45,7 +46,8 @@ SECTIONS: list[Section] = [
         "\n"
         "When to reach for build123d://drafting instead:\n"
         "  - Output is an engineering drawing for fabrication.\n"
-        "  - You need tolerance dims, GD&T, title block, multi-view sheets.\n"
+        "  - You need tolerance dims, GD&T symbols, title block, multi-view\n"
+        "    sheets (the drafting helpers cover all of these).\n"
         "  - Two-colour (black part + blue dims) is enough.\n"
         "\n"
         "Pipeline:\n"
