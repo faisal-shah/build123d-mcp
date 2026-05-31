@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.27 — 2026-05-31
+
+### Documentation
+
+- **GD&T drafting recipe**: the drafting cookbook now documents `feature_control_frame()`, `datum_feature()`, and `surface_finish_mark()` (a runnable `gdt_symbols` example), and the "no GD&T symbols" limitation note is removed. The presentation cookbook's "use the heavier path for GD&T" wording is corrected — the drafting helpers cover feature control frames, datum features, and surface-finish marks.
+
+### Dependencies
+
+- **`build123d-drafting-helpers` pin bumped `>=0.1.5` → `>=0.1.7`**, which is the release that adds the GD&T symbol helpers (ISO 1101 feature control frames, ISO 5459 datum features).
+
 ## v0.3.26 — 2026-05-21
 
 ### Features
