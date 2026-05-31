@@ -357,9 +357,16 @@ def last_error() -> str:
 
 @mcp.tool()
 def version() -> str:
-    """Return the build123d-mcp server version."""
-    from importlib.metadata import version as _version
-    return _version("build123d-mcp")
+    """Return the installed versions of the build123d-mcp server and its key dependencies (build123d, build123d-drafting-helpers). Use this to confirm which server build is running — e.g. to check whether a feature or fix is present, or whether the client is talking to a stale install."""
+    info = _session.version()
+    return "\n".join(
+        f"{label}: {info.get(key, 'unknown')}"
+        for key, label in (
+            ("build123d_mcp", "build123d-mcp"),
+            ("build123d", "build123d"),
+            ("build123d_drafting_helpers", "build123d-drafting-helpers"),
+        )
+    )
 
 
 @mcp.tool()
