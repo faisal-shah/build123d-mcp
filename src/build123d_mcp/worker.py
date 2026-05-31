@@ -367,7 +367,7 @@ class WorkerSession:
     def health_check(self) -> str:
         return self._call("health_check", {}, self._RENDER_TIMEOUT)
 
-    def version(self) -> str:
+    def version(self) -> dict:
         return self._call("version", {}, self._SHORT_TIMEOUT)
 
     def last_error(self) -> str:
