@@ -136,8 +136,8 @@ def _dispatch(session: Any, op: str, args: dict, library_index: Any) -> Any:
         return health_check(session)
 
     if op == "version":
-        from importlib.metadata import version
-        return version("build123d-mcp")
+        from build123d_mcp.tools.version import version_info
+        return version_info()
 
     if op == "last_error":
         from build123d_mcp.tools.last_error import last_error

@@ -1850,3 +1850,20 @@ def test_health_check_returns_json(session):
     assert data["export_step"]["ok"] is True
     assert data["export_stl"]["ok"] is True
     assert data["render_svg"]["ok"] is True
+
+
+def test_version_returns_package_versions():
+    """version_info() reports build123d-mcp and its key deps as a dict."""
+    from build123d_mcp.tools.version import version_info
+    info = version_info()
+    assert isinstance(info, dict)
+    for key in ("build123d_mcp", "build123d", "build123d_drafting_helpers"):
+        assert key in info, f"version_info() missing key {key!r}"
+        assert isinstance(info[key], str) and info[key], f"empty version for {key}"
+
+
+def test_version_build123d_mcp_matches_metadata():
+    """The reported build123d-mcp version matches importlib metadata."""
+    from importlib.metadata import version as _pkg_version
+    from build123d_mcp.tools.version import version_info
+    assert version_info()["build123d_mcp"] == _pkg_version("build123d-mcp")
