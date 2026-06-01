@@ -87,6 +87,23 @@ annotate(b, "dim_b")
         out = self._run(session)
         assert any(v["check"] == "annotation_overlap" for v in out["violations"])
 
+    def test_surfaces_geometry_precise_interference(self, session):
+        # find_interferences checks are now exposed through the MCP tool: a
+        # stacked dim whose extension line spears a neighbour's label.
+        session.execute("""
+from build123d import *
+from build123d_drafting import place_dims
+draft = Draft(font_size=2.5, decimal_precision=1)
+dims = place_dims([
+    ((-18, -10, 0), (18, -10, 0), "below", "36"),
+    ((-18, -10, 0), (0, -10, 0), "below", "18"),
+], draft, base_distance=6)
+for i, d in enumerate(dims):
+    annotate(d, f"dim_{i}")
+""")
+        checks = {v["check"] for v in self._run(session)["violations"]}
+        assert "line_pierces_label" in checks
+
     def test_no_false_overlap_for_separated_dims(self, session):
         # Dims stacked at distinct offsets must not be flagged.
         session.execute("""
