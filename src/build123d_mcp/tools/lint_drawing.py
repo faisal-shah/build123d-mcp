@@ -9,8 +9,9 @@ Two modes:
      the stored data: the leader elbow check (leader text geometry isn't stored
      separately) and the per-edge page-bounds check.
 
-  2. SVG mode: scans an exported SVG for layer-level pathologies that only show
-     up at export time (text on a no-fill layer), plus sidecar label checks.
+  2. SVG mode: scans an exported SVG for export-only pathologies — native
+     `<text>` elements (build123d renders glyph paths, so any `<text>` won't
+     DXF-export) — plus sidecar label checks.
 
 The structured violation list is JSON so the LLM can iterate without rendering.
 Each violation's `check` is the helpers' stable `LintIssue.code`.
@@ -20,16 +21,18 @@ import os
 import re
 import xml.etree.ElementTree as ET
 
+from build123d import Compound
 from build123d_drafting import (
     CenterlineResult,
     DimResult,
+    LeaderResult,
     find_interferences,
     lint_drawing as _helper_lint,
 )
 
 # Checks that apply to a single annotation — run per-item so the violation can
 # carry the session object name (the helpers' issues only know the label text).
-_PER_ITEM_CODES = {"label_vs_measured", "dim_inside_part"}
+_PER_ITEM_CODES = {"label_vs_measured", "dim_inside_part", "leader_line_through_text"}
 
 # The MCP elevates these helper "warning"s to "error" in its own contract.
 _SEVERITY_OVERRIDE = {"label_vs_measured": "error"}
@@ -55,10 +58,10 @@ def _pair_object(issue, items) -> str:
 
 
 def _reconstruct(session):
-    """[(name, result)] for each dim/centerline annotation that has geometry.
+    """[(name, result)] for each annotation that can be linted from stored data.
 
-    Leaders are skipped here — their text geometry isn't stored separately, so
-    the leader check stays in `_lint_leaders`.
+    Leaders are reconstructed from the stored `label_bbox` + `elbow` (no live
+    text geometry needed — the helper's leader check prefers `label_bbox`).
     """
     items = []
     for name, meta in session.drawing_annotations.items():
@@ -69,7 +72,13 @@ def _reconstruct(session):
             items.append((name, CenterlineResult(shape=shape,
                                                  label_str=meta.get("label_str", ""))))
         elif meta.get("elbow") is not None:
-            continue  # leader — handled by _lint_leaders
+            items.append((name, LeaderResult(
+                lines=Compound(children=[]), text=Compound(children=[]),
+                label_str=meta.get("label_str", ""),
+                tip=tuple(meta.get("tip") or (0.0, 0.0)),
+                elbow=tuple(meta["elbow"]),
+                label_bbox=meta.get("label_bbox"),
+            )))
         else:
             items.append((name, DimResult(
                 shape=shape,
@@ -100,36 +109,11 @@ def _lint_session(session) -> list[dict]:
     for issue in find_interferences(results):
         violations.append(_violation(issue, _pair_object(issue, items)))
 
-    # MCP-native checks the helpers can't run from the stored data
-    violations += _lint_leaders(session)
+    # the one MCP-native check: per-edge page bounds (more detailed than the
+    # helper's label↔frame check).
     if session.drawing_page:
         violations += _lint_page_bounds(
             session.drawing_annotations, session.objects, session.drawing_page)
-    return violations
-
-
-def _lint_leaders(session) -> list[dict]:
-    """Leader elbow inside the label region — MCP-native because the leader's
-    text geometry isn't stored separately from its lines in the session."""
-    violations: list[dict] = []
-    for name, ann in session.drawing_annotations.items():
-        elbow = ann.get("elbow")
-        if not elbow or name not in session.objects:
-            continue
-        try:
-            bb = session.objects[name].bounding_box()
-            if bb.min.X <= elbow[0] <= bb.max.X and bb.min.Y <= elbow[1] <= bb.max.Y:
-                violations.append({
-                    "severity": "warning",
-                    "check": "leader_elbow_in_label",
-                    "object": name,
-                    "message": (
-                        f"leader elbow ({elbow[0]:.2f}, {elbow[1]:.2f}) "
-                        f"may be inside the label bbox"
-                    ),
-                })
-        except Exception:
-            pass
     return violations
 
 
@@ -171,7 +155,11 @@ _SVG_NS = "{http://www.w3.org/2000/svg}"
 def _lint_svg(svg_path: str) -> list[dict]:
     """Layer-level checks on an exported SVG file, plus sidecar label checks.
 
-    - text on a group with `fill='none'` renders glyphs as illegible outlines;
+    - **native `<text>` elements** — build123d renders text as filled glyph
+      *paths*, never `<text>`. So any `<text>` means the SVG was produced (or
+      post-processed) outside the geometry pipeline: it won't survive a DXF
+      export and won't scale with the model. Flag it (worse still when it also
+      has no fill, where it renders as illegible outlines).
     - label-vs-measured divergence from the `.dims.json` sidecar (no live
       geometry here, so the helper's per-item check is run on shape-less
       reconstructed `DimResult`s).
@@ -188,16 +176,20 @@ def _lint_svg(svg_path: str) -> list[dict]:
         m = re.search(r"fill:\s*([^;]+)", elem.get("style", ""))
         if m:
             fill = m.group(1).strip()
-        if elem.tag.replace(_SVG_NS, "") == "text" and fill in (None, "none", ""):
+        if elem.tag.replace(_SVG_NS, "") == "text":
             layer_id = elem.get("id") or "?"
+            no_fill = fill in (None, "none", "")
+            detail = (" and has no fill (renders as illegible outlines)"
+                      if no_fill else "")
             violations.append({
                 "severity": "error",
-                "check": "text_no_fill",
+                "check": "native_svg_text",
                 "object": layer_id,
                 "message": (
-                    f"<text> element id='{layer_id}' has fill='{fill}'; "
-                    f"glyphs will render as thick outlines, not filled. "
-                    f"Set fill_color on the SVG layer when exporting."
+                    f"native <text> element id='{layer_id}'{detail}. build123d "
+                    f"renders text as filled glyph paths, not <text> — native SVG "
+                    f"text won't export to DXF and won't scale with the model. "
+                    f"Re-export the label from build123d geometry."
                 ),
             })
         for child in elem:

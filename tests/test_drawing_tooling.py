@@ -104,6 +104,18 @@ for i, d in enumerate(dims):
         checks = {v["check"] for v in self._run(session)["violations"]}
         assert "line_pierces_label" in checks
 
+    def test_clean_leader_no_false_violation(self, session):
+        # The leader check is delegated to the helpers via the stored label_bbox.
+        # A correctly-built leader (line stops before the label) must not flag.
+        session.execute("""
+from build123d import *
+from build123d_drafting import leader
+draft = Draft(font_size=2.5, decimal_precision=1)
+ld = leader((0, 0, 0), (20, 12, 0), "Ø5 H7", draft)
+annotate(ld, "callout")
+""")
+        assert self._run(session)["violations"] == []
+
     def test_no_false_overlap_for_separated_dims(self, session):
         # Dims stacked at distinct offsets must not be flagged.
         session.execute("""
@@ -171,7 +183,9 @@ annotate(d, "dim")
 # ---------------------------------------------------------------------------
 
 class TestLintDrawingSvg:
-    def test_flags_text_without_fill(self, tmp_path):
+    def test_flags_native_text(self, tmp_path):
+        # build123d never emits <text> (it renders glyph paths), so any <text>
+        # means native SVG text that won't DXF-export — flagged regardless of fill.
         from build123d_mcp.tools.lint_drawing import lint_drawing
         svg = '''<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
   <g id="dims" fill="none">
@@ -181,13 +195,14 @@ class TestLintDrawingSvg:
         p = tmp_path / "bad.svg"
         p.write_text(svg)
         out = json.loads(lint_drawing(None, str(p)))
-        assert any(v["check"] == "text_no_fill" for v in out["violations"])
+        assert any(v["check"] == "native_svg_text" for v in out["violations"])
 
     def test_clean_svg_no_violations(self, tmp_path):
+        # A real build123d export uses <path> glyphs, not <text> — clean.
         from build123d_mcp.tools.lint_drawing import lint_drawing
         svg = '''<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
-  <g id="dims" fill="blue">
-    <text id="label" x="10" y="20" fill="blue">40</text>
+  <g id="dims" fill="black">
+    <path id="glyph" d="M10,10 L20,10 L20,20 Z"/>
   </g>
 </svg>'''
         p = tmp_path / "good.svg"

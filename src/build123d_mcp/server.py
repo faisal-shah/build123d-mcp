@@ -172,13 +172,16 @@ def view_axes(viewport_origin: list[float], viewport_up: list[float] = [0.0, 1.0
 def lint_drawing(svg_path: str = "") -> str:
     """Run structural drawing-quality checks and return JSON {violations: [...]}.
 
-    Session mode (default): scans session.objects + drawing_annotations for
-    label-vs-measured-length divergence (>0.5%, likely axis swap) and
-    leader-elbow-inside-label-bbox (line struck through text).
+    Session mode (default): reconstructs the session's annotations and delegates
+    to build123d-drafting-helpers (lint_drawing + find_interferences) — single
+    source of truth. Surfaces label-vs-measured divergence (axis swap), leader
+    line through its own label, annotation/label overlap, a witness/extension
+    line piercing a neighbour's label, redundant collinear lines, and page-bounds
+    overshoot.
 
-    SVG mode (svg_path set): scans an SVG file for layer-level pathologies
-    that only show up at export time — most importantly <text> elements with
-    fill='none' or no fill attribute (glyphs render as illegible thick outlines).
+    SVG mode (svg_path set): scans an SVG file for export-only pathologies — most
+    importantly native <text> elements (build123d renders glyph paths, so any
+    <text> won't DXF-export and won't scale with the model).
 
     Each violation is {severity, check, object, message}. Run this after major
     drawing additions; running it BEFORE rendering catches the bug at the source.
