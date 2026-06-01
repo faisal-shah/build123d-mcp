@@ -135,10 +135,6 @@ def _dispatch(session: Any, op: str, args: dict, library_index: Any) -> Any:
         from build123d_mcp.tools.health_check import health_check
         return health_check(session)
 
-    if op == "version":
-        from build123d_mcp.tools.version import version_info
-        return version_info()
-
     if op == "last_error":
         from build123d_mcp.tools.last_error import last_error
         return last_error(session)
@@ -366,9 +362,6 @@ class WorkerSession:
 
     def health_check(self) -> str:
         return self._call("health_check", {}, self._RENDER_TIMEOUT)
-
-    def version(self) -> dict:
-        return self._call("version", {}, self._SHORT_TIMEOUT)
 
     def last_error(self) -> str:
         return self._call("last_error", {}, self._SHORT_TIMEOUT)

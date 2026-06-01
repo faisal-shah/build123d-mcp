@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.30 — 2026-06-01
+
+### Added
+
+- **`version` MCP tool** now reports the server *and* its render-path dependencies
+  (`build123d`, `build123d-drafting-helpers`), not just the server — "is this current?"
+  usually needs all three. Computed **in-process** (pure `importlib.metadata`, same venv
+  as the worker), so it answers even when the build123d worker subprocess is down — the
+  stale / broken-install case the tool exists to diagnose.
+
 ## v0.3.29 — 2026-06-01
 
 ### Dependencies
