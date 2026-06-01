@@ -2,11 +2,23 @@
 
 ## v0.3.28 — 2026-06-01
 
+### Changed
+
+- **`lint_drawing` (session mode) now delegates to the helpers** instead of
+  reimplementing the geometry checks. It reconstructs `DimResult`/`CenterlineResult`
+  from the session and calls `build123d_drafting.lint_drawing()` +
+  `find_interferences()`, mapping each `LintIssue.code` to the violation `check`.
+  Single source of truth — the duplicated label-vs-measured / overlap / centerline
+  logic is gone. New geometry-precise checks (`line_pierces_label`, `redundant_lines`,
+  `labels_overlap`) are now surfaced through the MCP tool for the first time. The leader
+  elbow check and the per-edge page-bounds check stay MCP-native (leader text geometry
+  isn't stored separately); the SVG-export `text_no_fill` check is unchanged.
+
 ### Dependencies
 
-- **`build123d-drafting-helpers` pin bumped `>=0.1.7` → `>=0.1.9`**, picking up the
+- **`build123d-drafting-helpers` pin bumped `>=0.1.7` → `>=0.1.10`**, picking up the
   `surface_finish_mark` ISO-1302 fix, `add_to_layers()` SVG routing, `find_interferences()`
-  geometry-precise collision detection, and `draft_preset()`.
+  geometry-precise collision detection, `draft_preset()`, and `LintIssue.code`.
 
 ## v0.3.27 — 2026-05-31
 
