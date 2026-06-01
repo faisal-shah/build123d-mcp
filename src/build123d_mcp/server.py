@@ -360,9 +360,12 @@ def last_error() -> str:
 
 @mcp.tool()
 def version() -> str:
-    """Return the build123d-mcp server version."""
-    from importlib.metadata import version as _version
-    return _version("build123d-mcp")
+    """Return the installed versions of the build123d-mcp server and its key dependencies (build123d, build123d-drafting-helpers). Use this to confirm which server build is running — e.g. to check whether a feature or fix is present, or whether the client is talking to a stale install."""
+    # Computed in-process (pure importlib.metadata, same venv as the worker), so
+    # it still answers when the worker subprocess is down — exactly the stale /
+    # broken-install case this tool exists to diagnose.
+    from build123d_mcp.tools.version import version_info
+    return "\n".join(f"{name}: {ver}" for name, ver in version_info().items())
 
 
 @mcp.tool()

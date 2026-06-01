@@ -1850,3 +1850,29 @@ def test_health_check_returns_json(session):
     assert data["export_step"]["ok"] is True
     assert data["export_stl"]["ok"] is True
     assert data["render_svg"]["ok"] is True
+
+
+def test_version_returns_package_versions():
+    """version_info() reports build123d-mcp and its key deps, keyed by dist name."""
+    from build123d_mcp.tools.version import version_info
+    info = version_info()
+    assert isinstance(info, dict)
+    for key in ("build123d-mcp", "build123d", "build123d-drafting-helpers"):
+        assert key in info, f"version_info() missing key {key!r}"
+        assert isinstance(info[key], str) and info[key], f"empty version for {key}"
+
+
+def test_version_build123d_mcp_matches_metadata():
+    """The reported build123d-mcp version matches importlib metadata."""
+    from importlib.metadata import version as _pkg_version
+    from build123d_mcp.tools.version import version_info
+    assert version_info()["build123d-mcp"] == _pkg_version("build123d-mcp")
+
+
+def test_version_unknown_package_reports_unknown(monkeypatch):
+    """A package that isn't installed reports "unknown" rather than raising."""
+    import build123d_mcp.tools.version as v
+    monkeypatch.setattr(v, "_PACKAGES", ("build123d-mcp", "definitely-not-installed-xyz"))
+    info = v.version_info()
+    assert info["definitely-not-installed-xyz"] == "unknown"
+    assert info["build123d-mcp"] != "unknown"
