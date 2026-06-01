@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.3.29 — 2026-06-01
+
+### Dependencies
+
+- **`build123d-drafting-helpers` pin bumped `>=0.1.11` → `>=0.1.13`**, picking up the
+  GD&T completions: basic (theoretically-exact) dimensions (`dim_linear(basic=True)`),
+  datum targets (`datum_target`), composite feature control frames
+  (`composite_feature_control_frame`), hole callouts (`hole_callout` — ⌀ ⌴ ⌵ ↧),
+  all-around / all-over leaders (`leader(all_around=…)`), and the
+  `find_interferences(obstacles=…)` label-over-geometry check with the vertical-dim
+  `label_bbox` fix. Drawing scripts run via `execute` can now use these directly.
+
+## v0.3.28 — 2026-06-01
+
+### Changed
+
+- **`lint_drawing` (session mode) now delegates to the helpers** instead of
+  reimplementing the geometry checks. It reconstructs `DimResult`/`CenterlineResult`
+  from the session and calls `build123d_drafting.lint_drawing()` +
+  `find_interferences()`, mapping each `LintIssue.code` to the violation `check`.
+  Single source of truth — the duplicated label-vs-measured / overlap / centerline
+  logic is gone. New geometry-precise checks (`line_pierces_label`, `redundant_lines`,
+  `labels_overlap`) are now surfaced through the MCP tool for the first time. The
+  **leader check is also delegated** — reconstructed from the stored `label_bbox`
+  (which fixes a latent bug: the old whole-leader-bbox check always contained the
+  elbow, so it could false-fire on every leader). Only the per-edge page-bounds check
+  stays MCP-native.
+- **SVG-mode check re-purposed** `text_no_fill` → **`native_svg_text`**: build123d
+  renders text as glyph *paths*, never `<text>`, so any `<text>` in an exported SVG
+  means it won't survive a DXF export / won't scale — flagged regardless of fill.
+
+### Dependencies
+
+- **`build123d-drafting-helpers` pin bumped `>=0.1.7` → `>=0.1.11`**, picking up the
+  `surface_finish_mark` ISO-1302 fix, `add_to_layers()` SVG routing, `find_interferences()`
+  geometry-precise collision detection, `draft_preset()`, `LintIssue.code`, and
+  `LeaderResult.label_bbox`.
+
+## v0.3.27 — 2026-05-31
+
+### Documentation
+
+- **GD&T drafting recipe**: the drafting cookbook now documents `feature_control_frame()`, `datum_feature()`, and `surface_finish_mark()` (a runnable `gdt_symbols` example), and the "no GD&T symbols" limitation note is removed. The presentation cookbook's "use the heavier path for GD&T" wording is corrected — the drafting helpers cover feature control frames, datum features, and surface-finish marks.
+
+### Dependencies
+
+- **`build123d-drafting-helpers` pin bumped `>=0.1.5` → `>=0.1.7`**, which is the release that adds the GD&T symbol helpers (ISO 1101 feature control frames, ISO 5459 datum features).
+
 ## v0.3.26 — 2026-05-21
 
 ### Features

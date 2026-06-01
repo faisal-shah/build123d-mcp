@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "build123d-mcp"
-version = "0.3.27.dev0"
+version = "0.3.30.dev0"
 description = "MCP server wrapping build123d for interactive 3D CAD"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
@@ -30,7 +30,7 @@ dependencies = [
     # Bundled at runtime so `inspect_drawing`'s docstring promise — and the
     # build123d://drafting cookbook — actually work out of the box.
     # Import name remains `build123d_drafting` (install name ≠ import name).
-    "build123d-drafting-helpers>=0.1.5",
+    "build123d-drafting-helpers>=0.1.13",
 ]
 
 [project.urls]
