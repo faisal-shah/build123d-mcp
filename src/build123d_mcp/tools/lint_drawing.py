@@ -2,8 +2,8 @@
 
 Two modes:
 
-  1. Session mode: reconstructs the session's annotations as build123d_drafting
-     result objects and **delegates the geometry checks to the helpers**
+  1. Session mode: reconstructs the session's annotations as lightweight duck-typed
+     stand-ins and **delegates the geometry checks to the helpers**
      (`lint_drawing` + `find_interferences`) — single source of truth, no
      duplicated check logic. The MCP keeps only what the helpers can't do from
      the stored data: the leader elbow check (leader text geometry isn't stored
@@ -21,11 +21,9 @@ import os
 import re
 import xml.etree.ElementTree as ET
 
-from build123d import Compound
+from types import SimpleNamespace
+
 from build123d_drafting import (
-    CenterlineResult,
-    DimResult,
-    LeaderResult,
     find_interferences,
     lint_drawing as _helper_lint,
 )
@@ -51,42 +49,59 @@ def _pair_object(issue, items) -> str:
     """Best-effort: session names whose label text appears in a pairwise message."""
     names = []
     for name, res in items:
-        label = getattr(res, "label_str", "")
+        label = getattr(res, "label", "")
         if label and (f'"{label}"' in issue.message or f"'{label}'" in issue.message):
             names.append(name)
     return "+".join(dict.fromkeys(names))
 
 
-def _reconstruct(session):
-    """[(name, result)] for each annotation that can be linted from stored data.
+def _standin(shape, **attrs):
+    """A lightweight duck-typed lint item (helpers 0.2.0 dropped the *Result
+    dataclasses; the helper lint reads attributes, not types).
 
-    Leaders are reconstructed from the stored `label_bbox` + `elbow` (no live
-    text geometry needed — the helper's leader check prefers `label_bbox`).
+    The caller passes ``segments`` straight from the stored metadata — the
+    helper objects precompute their centrelines (cheap tuples), so the
+    geometry-precise interference works WITHOUT re-extracting LINE edges from
+    the live traced-face geometry at lint time (that ran hundreds of OCC ops
+    per annotation and blew the worker's 10 s budget). The live
+    ``bounding_box`` is borrowed for the part-overlap and centerline extent
+    checks.
+    """
+    ns = SimpleNamespace(**attrs)
+    if "segments" not in attrs:
+        ns.segments = []
+    if shape is not None:
+        ns.bounding_box = shape.bounding_box
+    return ns
+
+
+def _reconstruct(session):
+    """[(name, standin)] for each annotation that can be linted from stored data.
+
+    Builds duck-typed stand-ins (label / label_bbox / elbow / measured_length /
+    is_centerline) backed by the live geometry, matching the attributes the
+    helpers' 0.2.0 linter reads.
     """
     items = []
     for name, meta in session.drawing_annotations.items():
         if name not in session.objects:
             continue
         shape = session.objects[name]
-        if meta.get("type") == "centerline":
-            items.append((name, CenterlineResult(shape=shape,
-                                                 label_str=meta.get("label_str", ""))))
+        label = meta.get("label_str", "")
+        segs = meta.get("segments") or []
+        if meta.get("is_centerline") or meta.get("type") in ("Centerline", "centerline"):
+            items.append((name, _standin(shape, label=label, is_centerline=True,
+                                         label_bbox=None, segments=segs)))
         elif meta.get("elbow") is not None:
-            items.append((name, LeaderResult(
-                lines=Compound(children=[]), text=Compound(children=[]),
-                label_str=meta.get("label_str", ""),
-                tip=tuple(meta.get("tip") or (0.0, 0.0)),
-                elbow=tuple(meta["elbow"]),
-                label_bbox=meta.get("label_bbox"),
-            )))
+            items.append((name, _standin(shape, label=label,
+                                         tip=tuple(meta.get("tip") or (0.0, 0.0)),
+                                         elbow=tuple(meta["elbow"]),
+                                         label_bbox=meta.get("label_bbox"), segments=segs)))
         else:
-            items.append((name, DimResult(
-                shape=shape,
-                label_str=meta.get("label_str", ""),
-                measured_length=meta.get("measured_length") or 0.0,
-                dim_level_y=meta.get("dim_level_y"),
-                label_bbox=meta.get("label_bbox"),
-            )))
+            items.append((name, _standin(shape, label=label,
+                                         measured_length=meta.get("measured_length") or 0.0,
+                                         dim_level_y=meta.get("dim_level_y"),
+                                         label_bbox=meta.get("label_bbox"), segments=segs)))
     return items
 
 
@@ -162,7 +177,7 @@ def _lint_svg(svg_path: str) -> list[dict]:
       has no fill, where it renders as illegible outlines).
     - label-vs-measured divergence from the `.dims.json` sidecar (no live
       geometry here, so the helper's per-item check is run on shape-less
-      reconstructed `DimResult`s).
+      duck-typed stand-ins).
     """
     violations: list[dict] = []
     try:
@@ -203,10 +218,11 @@ def _lint_svg(svg_path: str) -> list[dict]:
             with open(sidecar) as f:
                 annotations = json.load(f)
             for name, meta in annotations.items():
-                dim = DimResult(
-                    shape=None,
-                    label_str=meta.get("label_str", ""),
+                dim = _standin(
+                    None,
+                    label=meta.get("label_str", ""),
                     measured_length=meta.get("measured_length") or 0.0,
+                    label_bbox=None,
                 )
                 for issue in _helper_lint([dim]):
                     if issue.code == "label_vs_measured":

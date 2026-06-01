@@ -10,6 +10,21 @@
   as the worker), so it answers even when the build123d worker subprocess is down — the
   stale / broken-install case the tool exists to diagnose.
 
+### Dependencies
+
+- **`build123d-drafting-helpers` pin bumped `>=0.1.13` → `>=0.2.0`** — the helpers are now
+  native build123d `BaseSketchObject`s (the builders are classes: `Dimension`, `Leader`,
+  `FeatureControlFrame`, `DatumFeature`, `DatumTarget`, `SurfaceFinish`, `HoleCallout`,
+  `CompositeFeatureControlFrame`, `TitleBlock`, `Centerline`, `SafeDimension`). The drafting
+  cookbook and `inspect_drawing`/`lint_drawing` examples are updated to the class API; a
+  drawing now exports on a single ink layer (no `.lines`/`.text` split).
+- **`lint_drawing` session-mode rewired for helpers 0.2.0.** The `*Result` dataclasses are
+  gone, so it now feeds the helpers' duck-typed linter lightweight stand-ins built from the
+  stored annotation metadata (`label` / `label_bbox` / `segments` / `elbow` /
+  `measured_length`), borrowing the live geometry's `bounding_box`. `annotate()` captures the
+  objects' `.label` (renamed from `.label_str` upstream) and precomputed `.segments`, so the
+  geometry-precise interference check stays fast (no live edge re-extraction).
+
 ## v0.3.29 — 2026-06-01
 
 ### Dependencies

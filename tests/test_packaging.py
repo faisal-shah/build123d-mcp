@@ -10,7 +10,7 @@ def test_build123d_drafting_helpers_is_runtime_dependency():
     """build123d-drafting-helpers must ship as a runtime dependency (issue #106).
 
     The `inspect_drawing` tool's docstring and the `build123d://drafting` cookbook
-    both instruct users to `from build123d_drafting import dim_linear, Draft`.
+    both instruct users to `from build123d_drafting import Dimension, Draft`.
     That promise only holds if the helper package is installed alongside the
     server in a runtime install (`uv tool run build123d-mcp`, `pip install
     build123d-mcp`). Moving it back to a dev-only dep would silently break the
@@ -34,7 +34,7 @@ def test_build123d_drafting_importable_in_sandbox():
     ws = WorkerSession(exec_timeout=30)
     try:
         out = ws.execute(
-            "from build123d_drafting import dim_linear, leader, view_axes, lint_drawing\n"
+            "from build123d_drafting import Dimension, Leader, view_axes, lint_drawing\n"
             "print('imports OK')"
         )
         assert "imports OK" in out, out

@@ -107,7 +107,7 @@ def inspect_drawing(session, objects: str = "", svg_path: str = "") -> str:
 
     For each named object in the session, reports its page-space bounding box,
     topology counts, and — if the object was registered via annotate() using a
-    build123d_drafting DimResult or LeaderResult — the stored label string,
+    build123d_drafting Dimension or Leader object — the stored label string,
     measured length, and tip/elbow coordinates.
 
     Args:
@@ -215,7 +215,7 @@ def _lint(objects: dict, annotations: dict) -> list[str]:
             ex, ey = elbow
             if bb["min_x"] <= ex <= bb["max_x"] and bb["min_y"] <= ey <= bb["max_y"]:
                 warnings.append(
-                    f"'{name}': leader elbow ({ex:.2f}, {ey:.2f}) may be inside the label bbox"
+                    f"'{name}': Leader elbow ({ex:.2f}, {ey:.2f}) may be inside the label bbox"
                 )
 
     return warnings

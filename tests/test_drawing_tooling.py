@@ -51,9 +51,9 @@ class TestLintDrawingSession:
         session.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="35")  # label wrong: real is 20
+w = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="35")  # label wrong: real is 20
 annotate(w, "wrong_dim")
 """)
         out = self._run(session)
@@ -66,9 +66,9 @@ annotate(w, "wrong_dim")
         session.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+w = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
 annotate(w, "good_dim")
 """)
         assert self._run(session)["violations"] == []
@@ -77,10 +77,10 @@ annotate(w, "good_dim")
         # Two dims at the same offset on the same segment will collide.
         session.execute("""
 from build123d import *
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-a = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
-b = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+a = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+b = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
 annotate(a, "dim_a")
 annotate(b, "dim_b")
 """)
@@ -105,13 +105,13 @@ for i, d in enumerate(dims):
         assert "line_pierces_label" in checks
 
     def test_clean_leader_no_false_violation(self, session):
-        # The leader check is delegated to the helpers via the stored label_bbox.
-        # A correctly-built leader (line stops before the label) must not flag.
+        # The Leader check is delegated to the helpers via the stored label_bbox.
+        # A correctly-built Leader (line stops before the label) must not flag.
         session.execute("""
 from build123d import *
-from build123d_drafting import leader
+from build123d_drafting import Leader
 draft = Draft(font_size=2.5, decimal_precision=1)
-ld = leader((0, 0, 0), (20, 12, 0), "Ø5 H7", draft)
+ld = Leader((0, 0, 0), (20, 12, 0), "Ø5 H7", draft)
 annotate(ld, "callout")
 """)
         assert self._run(session)["violations"] == []
@@ -120,10 +120,10 @@ annotate(ld, "callout")
         # Dims stacked at distinct offsets must not be flagged.
         session.execute("""
 from build123d import *
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-inner = dim_linear((-10, 0, 0), (10, 0, 0), "above",  8, draft, label="20")
-outer = dim_linear((-10, 0, 0), (10, 0, 0), "above", 18, draft, label="20")
+inner = Dimension((-10, 0, 0), (10, 0, 0), "above",  8, draft, label="20")
+outer = Dimension((-10, 0, 0), (10, 0, 0), "above", 18, draft, label="20")
 annotate(inner, "inner_dim")
 annotate(outer, "outer_dim")
 """)
@@ -134,10 +134,10 @@ annotate(outer, "outer_dim")
     def test_flags_annotation_out_of_bounds(self, session):
         session.execute("""
 from build123d import *
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
 # Dim placed far outside a tiny 50x50 mm page
-d = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+d = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
 annotate(d, "offpage_dim")
 set_page(50, 50, margin=5)
 """)
@@ -147,10 +147,10 @@ set_page(50, 50, margin=5)
     def test_no_out_of_bounds_when_within_page(self, session):
         session.execute("""
 from build123d import *
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
 # Dim centred at (100, 50) — well within A4 landscape page (5..292, 5..205)
-d = dim_linear((90, 50, 0), (110, 50, 0), "above", 8, draft, label="20")
+d = Dimension((90, 50, 0), (110, 50, 0), "above", 8, draft, label="20")
 annotate(d, "dim")
 set_page(297, 210, margin=5)
 """)
@@ -162,9 +162,9 @@ set_page(297, 210, margin=5)
         # Without set_page(), out-of-bounds check must not fire.
         session.execute("""
 from build123d import *
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-d = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+d = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
 annotate(d, "dim")
 """)
         out = self._run(session)
