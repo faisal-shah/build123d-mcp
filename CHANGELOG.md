@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.28 — 2026-06-01
+
+### Dependencies
+
+- **`build123d-drafting-helpers` pin bumped `>=0.1.7` → `>=0.1.9`**, picking up the
+  `surface_finish_mark` ISO-1302 fix, `add_to_layers()` SVG routing, `find_interferences()`
+  geometry-precise collision detection, and `draft_preset()`.
+
 ## v0.3.27 — 2026-05-31
 
 ### Documentation
