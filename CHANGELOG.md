@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.3.29 — 2026-06-01
+
+### Dependencies
+
+- **`build123d-drafting-helpers` pin bumped `>=0.1.11` → `>=0.1.13`**, picking up the
+  GD&T completions: basic (theoretically-exact) dimensions (`dim_linear(basic=True)`),
+  datum targets (`datum_target`), composite feature control frames
+  (`composite_feature_control_frame`), hole callouts (`hole_callout` — ⌀ ⌴ ⌵ ↧),
+  all-around / all-over leaders (`leader(all_around=…)`), and the
+  `find_interferences(obstacles=…)` label-over-geometry check with the vertical-dim
+  `label_bbox` fix. Drawing scripts run via `execute` can now use these directly.
+
 ## v0.3.28 — 2026-06-01
 
 ### Changed
