@@ -10,15 +10,21 @@
   `find_interferences()`, mapping each `LintIssue.code` to the violation `check`.
   Single source of truth — the duplicated label-vs-measured / overlap / centerline
   logic is gone. New geometry-precise checks (`line_pierces_label`, `redundant_lines`,
-  `labels_overlap`) are now surfaced through the MCP tool for the first time. The leader
-  elbow check and the per-edge page-bounds check stay MCP-native (leader text geometry
-  isn't stored separately); the SVG-export `text_no_fill` check is unchanged.
+  `labels_overlap`) are now surfaced through the MCP tool for the first time. The
+  **leader check is also delegated** — reconstructed from the stored `label_bbox`
+  (which fixes a latent bug: the old whole-leader-bbox check always contained the
+  elbow, so it could false-fire on every leader). Only the per-edge page-bounds check
+  stays MCP-native.
+- **SVG-mode check re-purposed** `text_no_fill` → **`native_svg_text`**: build123d
+  renders text as glyph *paths*, never `<text>`, so any `<text>` in an exported SVG
+  means it won't survive a DXF export / won't scale — flagged regardless of fill.
 
 ### Dependencies
 
-- **`build123d-drafting-helpers` pin bumped `>=0.1.7` → `>=0.1.10`**, picking up the
+- **`build123d-drafting-helpers` pin bumped `>=0.1.7` → `>=0.1.11`**, picking up the
   `surface_finish_mark` ISO-1302 fix, `add_to_layers()` SVG routing, `find_interferences()`
-  geometry-precise collision detection, `draft_preset()`, and `LintIssue.code`.
+  geometry-precise collision detection, `draft_preset()`, `LintIssue.code`, and
+  `LeaderResult.label_bbox`.
 
 ## v0.3.27 — 2026-05-31
 
