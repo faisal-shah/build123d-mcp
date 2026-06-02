@@ -169,7 +169,7 @@ def view_axes(viewport_origin: list[float], viewport_up: list[float] = [0.0, 1.0
 
 
 @mcp.tool()
-def lint_drawing(svg_path: str = "") -> str:
+def lint_drawing(svg_path: str = "", drawing_scale: float = 1.0) -> str:
     """Run structural drawing-quality checks and return JSON {violations: [...]}.
 
     Session mode (default): reconstructs the session's annotations and delegates
@@ -183,10 +183,17 @@ def lint_drawing(svg_path: str = "") -> str:
     importantly native <text> elements (build123d renders glyph paths, so any
     <text> won't DXF-export and won't scale with the model).
 
+    drawing_scale: when the geometry was scaled up before projecting — e.g. a
+    7.5 mm feature drawn at 5:1 via part.scale(5) — pass the same factor (5.0)
+    so the label-vs-measured check divides each measured path length by it
+    before comparing to the label. This lets labels carry the *real* dimension
+    while the geometry is drawn enlarged, instead of every dim tripping a false
+    axis-swap warning. Session mode only; defaults to 1.0 (no scaling).
+
     Each violation is {severity, check, object, message}. Run this after major
     drawing additions; running it BEFORE rendering catches the bug at the source.
     """
-    return _session.lint_drawing(svg_path)
+    return _session.lint_drawing(svg_path, drawing_scale)
 
 
 @mcp.tool()

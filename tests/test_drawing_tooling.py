@@ -177,6 +177,41 @@ annotate(d, "dim")
         session.reset()
         assert session.drawing_page is None
 
+    # --- drawing_scale (#147): N:1 drawings without false label_vs_measured ---
+
+    def _build_scaled(self, session, label):
+        # 20 mm of geometry; the label carries whatever string we pass.
+        session.execute(f"""
+from build123d import *
+from build123d_drafting import Dimension
+draft = Draft(font_size=2.5, decimal_precision=1)
+w = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="{label}")
+annotate(w, "scaled_dim")
+""")
+
+    def _run_scaled(self, session, drawing_scale):
+        from build123d_mcp.tools.lint_drawing import lint_drawing
+        return json.loads(lint_drawing(session, drawing_scale=drawing_scale))
+
+    def test_scaled_dim_with_real_label_is_clean(self, session):
+        # 20 mm drawn at 2:1 represents a real 10 mm feature; label "10" is correct.
+        self._build_scaled(session, "10")
+        out = self._run_scaled(session, 2.0)
+        assert not any(v["check"] == "label_vs_measured" for v in out["violations"])
+
+    def test_same_drawing_flagged_at_1to1(self, session):
+        # Without the scale (default 1.0), label "10" vs measured 20 is flagged —
+        # proves the scale param is what clears it, not a loosened check.
+        self._build_scaled(session, "10")
+        out = self._run_scaled(session, 1.0)
+        assert any(v["check"] == "label_vs_measured" for v in out["violations"])
+
+    def test_scaled_dim_with_unscaled_label_flagged(self, session):
+        # Labelling the drawn 20 mm instead of the real 10 mm is still caught at 2:1.
+        self._build_scaled(session, "20")
+        out = self._run_scaled(session, 2.0)
+        assert any(v["check"] == "label_vs_measured" for v in out["violations"])
+
 
 # ---------------------------------------------------------------------------
 # lint_drawing (SVG mode)
@@ -309,6 +344,26 @@ class TestDrawingToolsViaWorker:
         try:
             result = json.loads(ws.lint_drawing())
             assert "violations" in result
+        finally:
+            ws._kill_worker()
+
+    def test_lint_drawing_scale_through_worker(self):
+        # #147: drawing_scale must survive the IPC round-trip (client -> dispatch
+        # -> tool). A 20 mm dim labelled "10" is clean at 2:1, flagged at 1:1.
+        from build123d_mcp.worker import WorkerSession
+        ws = WorkerSession(exec_timeout=30)
+        try:
+            ws.execute(
+                "from build123d import *\n"
+                "from build123d_drafting import Dimension\n"
+                "draft = Draft(font_size=2.5, decimal_precision=1)\n"
+                "w = Dimension((-10,0,0),(10,0,0),'above',8,draft,label='10')\n"
+                "annotate(w, 'd')\n"
+            )
+            scaled = json.loads(ws.lint_drawing(drawing_scale=2.0))
+            assert not any(v["check"] == "label_vs_measured" for v in scaled["violations"])
+            unscaled = json.loads(ws.lint_drawing())
+            assert any(v["check"] == "label_vs_measured" for v in unscaled["violations"])
         finally:
             ws._kill_worker()
 

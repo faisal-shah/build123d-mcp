@@ -161,7 +161,8 @@ def _dispatch(session: Any, op: str, args: dict, library_index: Any) -> Any:
 
     if op == "lint_drawing":
         from build123d_mcp.tools.lint_drawing import lint_drawing
-        return lint_drawing(session, args.get("svg_path", ""))
+        return lint_drawing(session, args.get("svg_path", ""),
+                            args.get("drawing_scale", 1.0))
 
     if op == "render_drawing":
         from build123d_mcp.tools.render_drawing import render_drawing
@@ -391,8 +392,12 @@ class WorkerSession:
             self._SHORT_TIMEOUT,
         )
 
-    def lint_drawing(self, svg_path: str = "") -> str:
-        return self._call("lint_drawing", {"svg_path": svg_path}, self._SHORT_TIMEOUT)
+    def lint_drawing(self, svg_path: str = "", drawing_scale: float = 1.0) -> str:
+        return self._call(
+            "lint_drawing",
+            {"svg_path": svg_path, "drawing_scale": drawing_scale},
+            self._SHORT_TIMEOUT,
+        )
 
     def render_drawing(self, svg_path: str, width: int = 0, save_to: str = "") -> dict:
         return self._call(
