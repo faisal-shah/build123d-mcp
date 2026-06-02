@@ -26,15 +26,17 @@ SECTIONS: list[Section] = [
     Section(
         "BUILD123D 2D ENGINEERING DRAWINGS COOKBOOK\n"
         "===========================================\n"
-        "Code-first drafting: the LLM writes Python, the Python emits the DXF.\n"
-        "All annotation primitives live in build123d.drafting.\n"
+        "Code-first drafting: the LLM writes Python, the Python emits the DXF/SVG.\n"
+        "Annotations are the build123d_drafting helper CLASSES (native build123d\n"
+        "sketch objects) — they wrap build123d.drafting's lower-level primitives.\n"
         "\n"
-        "Workflow at a glance:\n"
+        "Workflow at a glance (a drawing is DONE only when lint_drawing() is clean):\n"
         "  1. Build the 3D part as usual.\n"
-        "  2. Project it to a 2D view via shape.project_to_viewport(...).\n"
-        "  3. Compose the projection with ExtensionLine / DimensionLine / Arrow\n"
-        "     annotations and a TechnicalDrawing title block.\n"
-        "  4. Export to DXF or SVG via ExportDXF / ExportSVG with layers.\n"
+        "  2. view_axes() to check the mapping, then project each view via\n"
+        "     shape.project_to_viewport(...).\n"
+        "  3. Dimension with Dimension / Leader / Centerline / GD&T classes; add a\n"
+        "     TitleBlock; annotate() each; set_page().\n"
+        "  4. lint_drawing() == 0 violations → render to eyeball → export DXF/SVG.\n"
         "\n"
         "REQUIRED PACKAGE: build123d-drafting-helpers\n"
         "=============================================\n"
@@ -146,6 +148,58 @@ SECTIONS: list[Section] = [
 
     Section(
         text="""\
+## ENGINEERING-DRAWING CONVENTIONS — read before you dimension
+## ==========================================================
+## The API and lint_drawing() stop you producing a *broken* drawing; these
+## rules stop you producing a *wrong* one. lint enforces the mechanical
+## checks — the judgement below is on you.
+##
+## WHICH VIEWS
+## - Use the fewest views that FULLY define the part. Many parts need one or
+##   two; a typical prismatic part needs front + top + one side.
+## - The FRONT view shows the most shape (the natural "in use" orientation),
+##   with the longest dimension horizontal.
+## - State the projection angle and place views to match it:
+##     third-angle (US / ASME): TOP above front, RIGHT-side view to the right.
+##     first-angle  (ISO / EU): TOP below front, RIGHT-side view to the LEFT.
+##   Be consistent — a mixed-angle sheet is a defect. Run view_axes() on every
+##   view before dimensioning: a bottom/back view negates an axis and mirrors
+##   anything you place by hand.
+##
+## HOW TO DIMENSION
+## - Locate every feature EXACTLY ONCE. Never dimension the same distance
+##   twice (e.g. both halves AND the overall length) — that is
+##   over-dimensioning, a defect. One controlling dimension per feature.
+## - Pick ONE scheme per direction and don't mix:
+##     baseline — every dim from a common datum edge/face (machined parts;
+##                tolerances don't accumulate). Prefer this.
+##     chain    — feature-to-feature (only when the chain is itself functional).
+## - Dimension to FUNCTIONAL / datum faces, never to a hidden line — expose the
+##   feature in a view first.
+## - Put dims BETWEEN views, smallest nearest the part, larger ones stacked
+##   outside (place_dims() does the stacking). Don't re-dimension a feature
+##   that's already dimensioned in another view.
+## - Circles → diameter with ⌀ ("⌀6 THRU"); arcs/fillets → radius with R
+##   ("R3"). Holes get a callout (⌀, THRU/depth, counterbore ⌴ …), not a plain
+##   linear dim.
+##
+## TOLERANCES & GD&T
+## - Put a general-tolerance note (e.g. "ISO 2768-m") in the title block; add
+##   explicit ± / limits only where the fit demands it.
+## - A position / profile GD&T frame needs BASIC dimensions —
+##   Dimension(..., basic=True), the boxed value — to state true position. A
+##   position frame with no basic dims is incomplete.
+## - Reference datums in constraint order (primary, secondary, tertiary) and
+##   tag those datum features with DatumFeature().
+##
+## THE GATE (do every step, in order)
+## build → view_axes() → project_to_viewport() → dimension with the helper
+## CLASSES → annotate() each → set_page() → lint_drawing() == 0 violations →
+## render to eyeball → export. Never export before lint is clean."""
+    ),
+
+    Section(
+        text="""\
 ## The Draft config — set once, reuse everywhere
 # Draft holds drawing-wide settings: font, font_size, units, decimal precision,
 # arrow size, line widths. Pass it into every dimension to keep them consistent.
@@ -158,21 +212,20 @@ SECTIONS: list[Section] = [
     Section(
         label="basic_dimension",
         text="""\
-## A single linear dimension with extension lines
-# ExtensionLine draws witness lines from the part's edge AND the dimension line
-# offset away from it. `border` is two points (or an Edge); `offset` is the
-# perpendicular distance from the part to the dim line.
+## A single linear dimension — the helper way (preferred)
+# Dimension is the helper class: witness lines + dim line + label, as a native
+# build123d Sketch. `side` ("above"/"below"/"left"/"right") picks the offset
+# direction from the path so you never compute the signed normal by hand; the
+# distance is the perpendicular offset from the part to the dim line.
 from build123d import *
+from build123d_drafting import Dimension
 
 draft = Draft(font_size=2.5, decimal_precision=1)
-# Annotate a horizontal 40mm distance, dimension placed 8mm below
-result = ExtensionLine(
-    border=[(-20, -10, 0), (20, -10, 0)],
-    offset=8,
-    draft=draft,
-    label="40",
-)
-show(result, "dim")""",
+# A horizontal 40 mm distance, dim line placed 8 mm below the lower edge.
+result = Dimension((-20, -10, 0), (20, -10, 0), "below", 8, draft, label="40")
+show(result, "dim")
+# (Dimension wraps build123d's ExtensionLine; reach for raw ExtensionLine only
+#  when you need its lower-level offset/tolerance knobs directly.)""",
     ),
 
     Section(
@@ -205,7 +258,7 @@ draft = Draft(font_size=2.5, decimal_precision=1)
 result = DimensionLine(
     path=[(-3, 0, 0), (3, 0, 0)],
     draft=draft,
-    label="ø6",
+    label="⌀6",
 )
 show(result, "dia_dim")""",
     ),
@@ -236,20 +289,22 @@ show(result, "top_view")""",
         label="dimensioned_view",
         text="""\
 ## Compose: project + add dimensions for a complete top view
-# This is the canonical "engineering drawing" pipeline. Each ExtensionLine
-# carries explicit engineering intent — the LLM picks which dimensions matter.
+# The canonical "engineering drawing" pipeline with the helper classes. Each
+# dimension carries explicit engineering intent — you pick which matter. Note
+# the convention: the overall size gets linear dims; the hole gets a ⌀ Leader
+# callout, not a linear dimension.
 from build123d import *
+from build123d_drafting import Dimension, Leader
 
 plate = Box(40, 20, 5) - Cylinder(3, 5).move(Location((10, 0, 0)))
 visible, _hidden = plate.project_to_viewport((0, 0, 100), (0, 1, 0), (0, 0, 0))
 
 draft = Draft(font_size=2.5, decimal_precision=1)
-length_dim = ExtensionLine(border=[(-20, -10, 0), (20, -10, 0)], offset=8, draft=draft, label="40")
-width_dim  = ExtensionLine(border=[(20, -10, 0), (20, 10, 0)], offset=8, draft=draft, label="20")
-hole_dim   = DimensionLine(path=[(13, 0, 0), (7, 0, 0)], draft=draft, label="ø6")
+length = Dimension((-20, -10, 0), (20, -10, 0), "below", 8, draft, label="40")
+width  = Dimension((20, -10, 0), (20, 10, 0), "right", 8, draft, label="20")
+hole   = Leader((10, 0, 0), (24, 12, 0), "⌀6 THRU", draft)   # hole → callout
 
-# Combine into one Compound for the test harness
-result = Compound(children=list(visible) + [length_dim, width_dim, hole_dim])
+result = Compound(children=list(visible) + [length, width, hole])
 show(result, "dimensioned_top")""",
     ),
 
@@ -289,17 +344,19 @@ show(result, "title_sheet")""",
 #                   — write the DXF for the user (or "svg" for docs)
 #
 # The example below just does step 1; steps 2 and 3 are MCP tool calls
-# the LLM makes after this execute() returns.
+# the LLM makes after this execute() returns. (Between annotate() and
+# render_view, call lint_drawing() and fix anything it flags.)
 from build123d import *
+from build123d_drafting import Dimension, Leader
 
 plate = Box(40, 20, 5) - Cylinder(3, 5).move(Location((10, 0, 0)))
 visible, _hidden = plate.project_to_viewport((0, 0, 100), (0, 1, 0), (0, 0, 0))
 draft = Draft(font_size=2.5, decimal_precision=1)
-length_dim = ExtensionLine(border=[(-20, -10, 0), (20, -10, 0)], offset=8, draft=draft, label="40")
-width_dim  = ExtensionLine(border=[(20, -10, 0), (20, 10, 0)], offset=8, draft=draft, label="20")
-hole_dim   = DimensionLine(path=[(13, 0, 0), (7, 0, 0)], draft=draft, label="ø6")
+length = Dimension((-20, -10, 0), (20, -10, 0), "below", 8, draft, label="40")
+width  = Dimension((20, -10, 0), (20, 10, 0), "right", 8, draft, label="20")
+hole   = Leader((10, 0, 0), (24, 12, 0), "⌀6 THRU", draft)
 
-result = Compound(children=list(visible) + [length_dim, width_dim, hole_dim])
+result = Compound(children=list(visible) + [length, width, hole])
 show(result, "bracket_top_view")""",
     ),
 
@@ -333,11 +390,12 @@ show(result, "three_view")""",
     Section(
         label="hole_table_pattern",
         text="""\
-## Hole-table pattern using measure().face_inventory
-# build123d doesn't ship a HoleTable class, but cylindrical face inventory
-# from measure() gives you everything needed: position, diameter, depth.
-# Below: enumerate cylindrical faces, then label each with a Leader.
+## Hole callouts from the cylindrical-face inventory
+# build123d doesn't ship a HoleTable class, but the cylindrical faces give you
+# position and diameter. Point a Leader at each hole with a proper ⌀ callout
+# (⌀ + size + THRU/depth) — read the diameter from the face, don't hard-code it.
 from build123d import *
+from build123d_drafting import Leader
 
 plate = (Box(40, 40, 5)
          - Cylinder(2, 5).move(Location((-10, -10, 0)))
@@ -351,16 +409,16 @@ print(f"found {len(hole_faces)} cylindrical faces")
 
 draft = Draft(font_size=2, decimal_precision=1)
 labels = []
-for i, face in enumerate(hole_faces):
-    # Use the face center for the Leader's anchor; offset for the label
+for face in hole_faces:
     c = face.center()
-    mark = DimensionLine(path=[(c.X, c.Y, 0), (c.X + 5, c.Y + 5, 0)],
-                         draft=draft, label=f"H{i+1}")
-    labels.append(mark)
+    dia = face.bounding_box().size.X          # ⌀ read from the hole wall
+    # Leader points at the hole; the shelf carries the callout clear of the part.
+    labels.append(Leader((c.X, c.Y, 0), (c.X + 10, c.Y + 10, 0),
+                         f"⌀{dia:g} THRU", draft))
 
 visible, _ = plate.project_to_viewport((0, 0, 100), (0, 1, 0), (0, 0, 0))
 result = Compound(children=list(visible) + labels)
-show(result, "hole_table_demo")""",
+show(result, "hole_callouts_demo")""",
     ),
 
     Section(
@@ -440,7 +498,7 @@ annotate(right,  "right_half",   label="40")
 annotate(height, "height",       label="50")
 
 # --- Register page so lint can check bounds ---
-# A4 landscape = 297 × 210 mm; 5 mm margin → drawable area 287 × 200 mm.
+# A4 landscape = 297 × 210 mm; 10 mm margin → drawable area 277 × 190 mm.
 # Call set_page() once after setting up the sheet/title block.
 set_page(297, 210, margin=10)
 
@@ -491,9 +549,10 @@ show(result, "stacked_dims_demo")""",
 ## GD&T: feature control frames, datum features, surface finish marks
 # build123d.drafting ships no GD&T primitives, and the geometric-characteristic
 # glyphs (⌖ ⊥ ∥ ◎ …) and surface-finish ticks are absent from CAD-safe fonts —
-# so build123d-drafting-helpers (>=0.1.7) draws them geometrically. Each helper
-# builds at the origin; move it into place with .moved(loc), and route
-# .lines / .text to separate SVG layers when you need ISO line/fill colours.
+# so build123d-drafting-helpers draws them geometrically as native sketch
+# objects. Each builds at the origin; move it into place with .moved(loc) and
+# export the whole thing on a single ink layer (lines are thin filled faces —
+# there is no .lines/.text split, and closed loops like ⌀/Ⓜ never flood).
 from build123d import *
 from build123d_drafting import (
     FeatureControlFrame, DatumFeature, SurfaceFinish,
@@ -516,8 +575,9 @@ datum_a = DatumFeature("A", draft=draft)
 # Surface finish mark with an Ra value, placed at a point (ISO 1302).
 finish = SurfaceFinish("1.6", position=(60, 0, 0), draft=draft)
 
-# In a real drawing, route .lines and .text to coloured ExportSVG layers; here
-# we just compose the objects for a preview.
+# Each is a Sketch — compose them and export on one ink layer (a position
+# tolerance like this also needs BASIC dimensions, Dimension(..., basic=True),
+# to locate the true position the frame controls).
 result = Compound(children=[
     fcf,
     datum_a.moved(Location((40, 0, 0))),

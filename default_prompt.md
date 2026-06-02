@@ -102,17 +102,23 @@ pip install build123d-drafting-helpers
 ```
 or with uv: `uv add build123d-drafting-helpers`. Do not switch to any other drawing library — install the package and retry.
 
-When asked to produce a technical drawing, dimensioned view, or annotated sheet:
+The `build123d_drafting` helpers are native build123d `BaseSketchObject`s (v0.2.0+): `Dimension`, `SafeDimension`, `Leader`, `Centerline`, `FeatureControlFrame`, `CompositeFeatureControlFrame`, `DatumFeature`, `DatumTarget`, `SurfaceFinish`, `HoleCallout`, `TitleBlock`, plus `place_dims` / `place_labels`, `view_axes`, `lint_drawing`, `find_interferences`, `find_overlaps`. Each returned object **is** a `Sketch` — compose them with `Compound(children=[...])` and export everything on one ink layer (lines render as thin filled faces; there is no `.lines`/`.text` split). Use these classes — do **not** hand-roll signed offsets or build annotations from raw `ExtensionLine`/circles+lines.
 
-1. **Read `build123d://drafting` first, before writing a single line of drawing code.** It contains the complete workflow with tested, working examples.
-2. Project 3D geometry with `project_to_viewport(...)` (built into build123d).
-3. Annotate with `build123d_drafting` helpers: `place_dims` or `place_labels` for automatic offset/label placement; `dim_linear`, `safe_dim_line`, `leader` for individual annotations; `centerline` + `register_centerline` for centrelines.
-4. Compose the sheet with `TechnicalDrawing` from `build123d.drafting` — title block, border, and multi-view layout are all handled for you.
-5. Export to SVG via `export("drawing", format="svg")` or DXF via `format="dxf"`.
-6. Review with `render_view()` — the server's 2D pipeline renders drafting objects natively.
-7. Use `inspect_drawing()` and `lint_drawing()` to verify annotation coverage before finalising.
+**A drawing is only "done" when `lint_drawing()` returns zero violations.** That gate is what makes it correct first time. The loop:
 
-This approach keeps dimensions parametrically tied to the geometry. If the model changes, re-run the drawing code and the dimensions update automatically. External tools like reportlab produce dead annotations that must be redrawn by hand after any model change — do not use them.
+1. **Read `build123d://drafting` first, before writing a single line of drawing code.** It has the full workflow, the *convention* rules (which views, how to dimension), and a complete worked detail-sheet to copy.
+2. Build the 3D part.
+3. `view_axes(camera, up, look_at)` for each view — confirm the axis mapping **before** placing any dimension; a flipped axis (e.g. bottom view negates world-X) mirrors everything you compose by hand.
+4. `project_to_viewport(...)` for each view.
+5. Dimension with the helper classes: `Dimension(p1, p2, "above"/"below"/"left"/"right", offset, draft, label=...)`, `Leader`, `Centerline`, GD&T frames. Use `place_dims` / `place_labels` for parallel stacks.
+6. `annotate(obj, name)` each annotation so `inspect_drawing()` / `lint_drawing()` can see it.
+7. **`lint_drawing()` — must be zero violations.** Fix every one (axis swap, annotation overlap, label-vs-measured mismatch, leader-through-text, out-of-bounds) before continuing. Call `set_page(w, h, margin)` first so bounds are checked too.
+8. `render_view()` / `render_drawing()` — eyeball the result.
+9. `export(name, "dxf")` for fabrication, or `"svg"` / `"pdf"` for documentation.
+
+**Dimensioning convention** (the cookbook expands each): locate every feature exactly **once** — never double-dimension; dimension to functional / datum faces, not to hidden lines; keep dimensions *between* views; smallest dimension nearest the part, larger ones outside; pick **one** scheme per direction (baseline from a datum, or chain — not both); a `position` GD&T tolerance requires **basic** dimensions (`Dimension(..., basic=True)`) to locate true position. State the projection convention (first- vs third-angle) and place the views to match.
+
+This keeps dimensions parametrically tied to the geometry — change the model, re-run, dimensions update. External tools (reportlab, etc.) produce dead annotations that must be redrawn by hand; do not use them.
 
 ## MCP resources
 
@@ -120,7 +126,7 @@ These read-only resources provide cookbooks and live session state. Fetch them a
 
 | Resource URI | Contents |
 |---|---|
-| `build123d://drafting` | **2D engineering drawings**: project views, dimension with ExtensionLine/DimensionLine, tolerances, TechnicalDrawing title block, multi-view sheets, hole tables, DXF/SVG export. Read this before writing any drawing code. |
+| `build123d://drafting` | **2D engineering drawings**: project views, dimension with the `build123d_drafting` helper classes (`Dimension`, `Leader`, `Centerline`, GD&T frames, `TitleBlock`), tolerances, multi-view sheets, hole callouts, the dimensioning/projection conventions, the `lint_drawing` gate, and DXF/SVG export. Read this before writing any drawing code. |
 | `build123d://quickref` | build123d API quick reference: primitives, booleans, positioning, sketch-to-3D, selectors, fillets. |
 | `build123d://selectors` | Selector cookbook: top face, circular edges, filter by area/length/radius, `Select.LAST`, fillet detection. |
 | `build123d://session` | Live session state: current shape, named objects, snapshots, namespace variables. |
