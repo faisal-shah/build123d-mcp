@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.3.31 — 2026-06-02
+
+### Documentation
+
+- **Drafting guidance hardened for first-pass correctness.** `default_prompt.md`'s 2D
+  section and the `build123d://drafting` cookbook now lead with the v0.2.0 helper *classes*
+  (`Dimension`, `Leader`, `Centerline`, GD&T frames, `TitleBlock`) instead of the removed
+  0.1.x functions / raw `ExtensionLine`, and the canonical examples were converted to match.
+- **Added an engineering-drawing *conventions* section** (which views, projection angle,
+  dimensioning scheme — locate each feature once, baseline vs chain, dimension to functional
+  faces, hole callouts, basic dims for position tolerances) — the judgement rules the cookbook
+  previously lacked.
+- **Codified the gate**: build → `view_axes` → project → dimension → `annotate` → `set_page`
+  → `lint_drawing()` **== 0 violations** → render → export.
+- Fixed stale advice: the GD&T recipe no longer references the removed `.lines`/`.text` split;
+  the hole example uses a proper `⌀` Leader callout (read from the face) instead of a
+  repurposed `DimensionLine`; `set_page` margin comment and `ø`→`⌀` corrected.
+
 ## v0.3.30 — 2026-06-01
 
 ### Added
