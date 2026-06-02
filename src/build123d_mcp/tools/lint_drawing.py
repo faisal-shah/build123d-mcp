@@ -105,20 +105,20 @@ def _reconstruct(session):
     return items
 
 
-def _lint_session(session) -> list[dict]:
+def _lint_session(session, drawing_scale: float = 1.0) -> list[dict]:
     items = _reconstruct(session)
     results = [r for _, r in items]
     violations: list[dict] = []
 
     # per-item checks (carry the session name)
     for name, res in items:
-        for issue in _helper_lint([res]):
+        for issue in _helper_lint([res], drawing_scale=drawing_scale):
             if issue.code in _PER_ITEM_CODES:
                 violations.append(_violation(issue, name))
 
     # pairwise checks + geometry-precise interference over the whole set
     if len(results) >= 2:
-        for issue in _helper_lint(results):
+        for issue in _helper_lint(results, drawing_scale=drawing_scale):
             if issue.code not in _PER_ITEM_CODES:
                 violations.append(_violation(issue, _pair_object(issue, items)))
     for issue in find_interferences(results):
@@ -167,7 +167,7 @@ def _lint_page_bounds(annotations: dict, objects: dict, page: dict) -> list[dict
 _SVG_NS = "{http://www.w3.org/2000/svg}"
 
 
-def _lint_svg(svg_path: str) -> list[dict]:
+def _lint_svg(svg_path: str, drawing_scale: float = 1.0) -> list[dict]:
     """Layer-level checks on an exported SVG file, plus sidecar label checks.
 
     - **native `<text>` elements** — build123d renders text as filled glyph
@@ -224,7 +224,7 @@ def _lint_svg(svg_path: str) -> list[dict]:
                     measured_length=meta.get("measured_length") or 0.0,
                     label_bbox=None,
                 )
-                for issue in _helper_lint([dim]):
+                for issue in _helper_lint([dim], drawing_scale=drawing_scale):
                     if issue.code == "label_vs_measured":
                         violations.append(_violation(issue, name))
         except Exception as exc:
@@ -238,15 +238,19 @@ def _lint_svg(svg_path: str) -> list[dict]:
     return violations
 
 
-def lint_drawing(session, svg_path: str = "") -> str:
+def lint_drawing(session, svg_path: str = "", drawing_scale: float = 1.0) -> str:
     """Run structural drawing checks; return JSON with a `violations` list.
 
     Args:
         svg_path: if given, lint the SVG file at this path (mode 2). Otherwise
             lint the live session (mode 1).
+        drawing_scale: N:1 factor the geometry was scaled by before projecting;
+            the label-vs-measured check divides measured lengths by it so labels
+            carry the real dimension. Session mode only; defaults to 1.0.
 
     Returns:
         JSON: {"violations": [{severity, check, object, message}, ...]}
     """
-    violations = _lint_svg(svg_path) if svg_path else _lint_session(session)
+    violations = (_lint_svg(svg_path, drawing_scale) if svg_path
+                  else _lint_session(session, drawing_scale))
     return json.dumps({"violations": violations}, indent=2)

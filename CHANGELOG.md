@@ -1,5 +1,29 @@
 # Changelog
 
+## v0.3.32 — 2026-06-02
+
+### Added
+
+- **`lint_drawing(drawing_scale=...)`** (#147) — the lint tool now accepts a
+  drawing scale so N:1 drawings of small parts lint cleanly. When the geometry
+  was scaled up before projecting (e.g. `part.scale(5)` for a 7.5 mm feature
+  drawn at 5:1), pass the same factor and the label-vs-measured check divides
+  each measured length by it, so labels carry the *real* dimension instead of
+  every dim tripping a false axis-swap warning. Threaded through the tool, the
+  worker IPC, and both the session and SVG-sidecar lint paths; defaults to 1.0.
+
+### Changed
+
+- **Bumped `build123d-drafting-helpers` pin to `>=0.3.0`**, which ships the
+  `drawing_scale` support above plus `set_page`/`annotate` package exports and a
+  page-bounds check (#148), the stacked-dimension `annotation_overlap` fix
+  (#149), and title-block page-overflow detection (#151).
+
+### Documentation
+
+- Cookbook (`build123d://drafting`) documents `drawing_scale` for scaled
+  drawings and the matching `TitleBlock(drawing_scale=...)` printed indicator.
+
 ## v0.3.31 — 2026-06-02
 
 ### Documentation
