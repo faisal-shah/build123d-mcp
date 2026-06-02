@@ -47,8 +47,8 @@ class Session:
 
             Accepts two flavours of input:
 
-            1. build123d_drafting DimResult / LeaderResult — extracted by
-               attribute: label_str, measured_length, tip, elbow.
+            1. build123d_drafting Dimension / Leader objects — extracted by
+               attribute: label, measured_length, tip, elbow.
             2. Vanilla build123d.ExtensionLine / DimensionLine — measured
                length is read from the .dimension attribute that build123d
                sets during construction. The label string is NOT stored on
@@ -59,7 +59,7 @@ class Session:
             is visible to render_view.
 
             Args:
-                result: a DimResult, LeaderResult, ExtensionLine,
+                result: a Dimension, Leader, ExtensionLine,
                     DimensionLine, or any shape — anything else is registered
                     without annotation metadata.
                 name: object name for the session registry. Defaults to
@@ -69,14 +69,21 @@ class Session:
                     the same string you gave to the ExtensionLine constructor
                     (e.g. label="40"). Omit only when you don't need lint
                     coverage. For automatic label capture without duplication
-                    use dim_linear() from build123d_drafting instead.
+                    use Dimension() from build123d_drafting instead.
             """
             if name is None:
-                name = getattr(result, "label_str", None) or "annotation"
+                name = getattr(result, "label", None) or "annotation"
             meta: dict[str, Any] = {"type": type(result).__name__}
-            # Helper-library duck-typed extraction.
-            for attr in ("label_str", "measured_length", "tip", "elbow",
-                         "label_bbox", "dim_level_y"):
+            # Helper-library duck-typed extraction. (helpers 0.2.0 renamed the
+            # text attribute label_str -> label; the stored key stays "label_str"
+            # so the sidecar/inspect_drawing format is unchanged.)
+            lbl = getattr(result, "label", None)
+            if lbl:
+                meta["label_str"] = lbl
+            if getattr(result, "is_centerline", False):
+                meta["is_centerline"] = True
+            for attr in ("measured_length", "tip", "elbow",
+                         "label_bbox", "dim_level_y", "segments"):
                 val = getattr(result, attr, None)
                 if val is not None:
                     meta[attr] = val
@@ -98,7 +105,7 @@ class Session:
                 # label==measured → silent false negatives. Leave label_str
                 # absent so lint skips the check rather than falsely approving
                 # a potentially wrong drawing. Pass label= explicitly or use
-                # dim_linear() from build123d_drafting to enable lint.
+                # Dimension() from build123d_drafting to enable lint.
             # Store the dim-line level (the extreme Y away from the part edge)
             # so lint_drawing can compare levels without false positives from
             # extension lines that span from Y≈0 to the dim line.

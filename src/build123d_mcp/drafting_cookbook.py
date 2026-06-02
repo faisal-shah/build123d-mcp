@@ -58,19 +58,20 @@ SECTIONS: list[Section] = [
         "\n"
         "Key helpers and why to use them:\n"
         "\n"
-        "  dim_linear(p1, p2, side, distance, draft, label, tolerance)\n"
+        "  Dimension(p1, p2, side, distance, draft, label, tolerance)\n"
         "    Like ExtensionLine but side='above'/'below'/'left'/'right' instead of\n"
         "    a raw signed offset. The sign is computed from the path direction so\n"
-        "    you never have to guess. Returns DimResult(shape, label_str, measured_length).\n"
+        "    you never have to guess. Is a build123d sketch object carrying .label,\n"
+        "    .label_bbox and .measured_length.\n"
         "\n"
-        "  safe_dim_line(path, label, draft)\n"
+        "  SafeDimension(path, label, draft)\n"
         "    Like DimensionLine but won't raise ValueError when the label is wider\n"
         "    than the path. Truncates gracefully and retries.\n"
         "\n"
-        "  leader(tip, elbow, label, draft)\n"
-        "    Builds a leader from scratch. The shaft line stops before the label text\n"
-        "    (no strikethrough). Returns LeaderResult(lines, text, ...) so lines and\n"
-        "    text can be routed to separate SVG layers with fill_color set.\n"
+        "  Leader(tip, elbow, label, draft)\n"
+        "    Builds a Leader from scratch. The shaft line stops before the label text\n"
+        "    (no strikethrough). Is a sketch object — lines render as thin filled\n"
+        "    faces, so export the whole thing on one fill_color (ink) layer.\n"
         "\n"
         "  view_axes(viewport_origin, viewport_up, look_at)\n"
         "    Returns {'world_X': ('page_X', +1.0), 'world_Z': ('depth', 0.0), ...}\n"
@@ -78,20 +79,21 @@ SECTIONS: list[Section] = [
         "    world-X: {'world_X': ('page_X', -1.0)}) before they corrupt your dims.\n"
         "\n"
         "  annotate(result, name)  — or  annotate(result, name, label='40')\n"
-        "    Session builtin (always available). Like show() but for DimResult /\n"
-        "    LeaderResult: stores annotation metadata AND registers the shape.\n"
+        "    Session builtin (always available). Like show() but for annotation\n"
+        "    objects (Dimension / Leader / …): stores annotation metadata AND\n"
+        "    registers the shape.\n"
         "    After annotate(), call inspect_drawing() to get a structured JSON report\n"
         "    with bboxes and lint warnings without needing to render.\n"
         "\n"
         "    IMPORTANT — label= and lint coverage:\n"
-        "    • dim_linear() returns DimResult which carries label_str automatically.\n"
+        "    • Dimension() is a sketch object that carries .label automatically.\n"
         "      annotate(dim_result, name) → full lint coverage, no extra args needed.\n"
         "    • Vanilla ExtensionLine does NOT store the constructor label after\n"
         "      construction (build123d limitation, see gumyr/build123d#1315).\n"
         "      annotate(ext_line, name)            → label_str absent, lint skipped.\n"
         "      annotate(ext_line, name, label='40') → label_str='40', lint active.\n"
         "    Always pass label= when using raw ExtensionLine/DimensionLine, or\n"
-        "    switch to dim_linear() to avoid the duplication.\n"
+        "    switch to Dimension() to avoid the duplication.\n"
         "\n"
         "  place_dims(specs, draft, base_distance=8.0, tier_spacing=None)\n"
         "    Build a stack of parallel dims with automatically assigned offsets.\n"
@@ -102,16 +104,16 @@ SECTIONS: list[Section] = [
         "\n"
         "  place_labels(specs, draft, centerlines, gap=1.0)\n"
         "    Like place_dims but also shifts each label the minimum distance left\n"
-        "    or right to clear any vertical centerline that would cross it.\n"
-        "    Specs same format as place_dims. Pass centerline() objects as centerlines.\n"
+        "    or right to clear any vertical Centerline that would cross it.\n"
+        "    Specs same format as place_dims. Pass Centerline() objects as centerlines.\n"
         "\n"
-        "  centerline(p1, p2)\n"
+        "  Centerline(p1, p2)\n"
         "    Thin Edge compound representing a centreline. Register with\n"
         "    register_centerline(cl, name) so lint_drawing() can flag label overlaps.\n"
         "\n"
         "  PREFERRED WORKFLOW for multi-dim drawings:\n"
-        "    from build123d_drafting import place_dims, place_labels, centerline\n"
-        "    cl = centerline((cx, -30, 0), (cx, 30, 0))  # bore axis\n"
+        "    from build123d_drafting import place_dims, place_labels, Centerline\n"
+        "    cl = Centerline((cx, -30, 0), (cx, 30, 0))  # bore axis\n"
         "    register_centerline(cl, 'bore_cl')\n"
         "    dims = place_dims([\n"
         "        (p1, p2, 'above', 'label'),   # innermost first\n"
@@ -124,19 +126,19 @@ SECTIONS: list[Section] = [
         "\n"
         "  lint_drawing(items, part_bbox=None)\n"
         "    Checks: label value vs measured length (>0.5% = likely axis swap),\n"
-        "    dim bbox overlapping part outline, leader shaft through label text,\n"
-        "    annotation overlap, page bounds (after set_page), centerline-label\n"
+        "    dim bbox overlapping part outline, Leader shaft through label text,\n"
+        "    annotation overlap, page bounds (after set_page), Centerline-label\n"
         "    overlap (after register_centerline).\n"
         "\n"
         "Example — the preferred drawing pipeline:\n"
         "  from build123d import *\n"
-        "  from build123d_drafting import dim_linear, leader, view_axes\n"
+        "  from build123d_drafting import Dimension, Leader, view_axes\n"
         "  draft = Draft(font_size=2.5, decimal_precision=1)\n"
         "  # 1. Check axes before placing dims\n"
         "  axes = view_axes((0, 0, 100), (0, 1, 0))  # top view\n"
         "  # => {'world_X': ('page_X', 1.0), 'world_Y': ('page_Y', 1.0), ...}\n"
         "  # 2. Annotate with named sides, not signed offsets\n"
-        "  w = dim_linear((-20, -10, 0), (20, -10, 0), 'below', 8, draft, label='40')\n"
+        "  w = Dimension((-20, -10, 0), (20, -10, 0), 'below', 8, draft, label='40')\n"
         "  annotate(w, 'width')   # stores metadata; renders via render_view\n"
         "  # 3. Verify numerically before rendering\n"
         "  # => call inspect_drawing() to get bboxes + lint warnings"
@@ -334,7 +336,7 @@ show(result, "three_view")""",
 ## Hole-table pattern using measure().face_inventory
 # build123d doesn't ship a HoleTable class, but cylindrical face inventory
 # from measure() gives you everything needed: position, diameter, depth.
-# Below: enumerate cylindrical faces, then label each with a leader.
+# Below: enumerate cylindrical faces, then label each with a Leader.
 from build123d import *
 
 plate = (Box(40, 40, 5)
@@ -350,11 +352,11 @@ print(f"found {len(hole_faces)} cylindrical faces")
 draft = Draft(font_size=2, decimal_precision=1)
 labels = []
 for i, face in enumerate(hole_faces):
-    # Use the face center for the leader's anchor; offset for the label
+    # Use the face center for the Leader's anchor; offset for the label
     c = face.center()
-    leader = DimensionLine(path=[(c.X, c.Y, 0), (c.X + 5, c.Y + 5, 0)],
-                           draft=draft, label=f"H{i+1}")
-    labels.append(leader)
+    mark = DimensionLine(path=[(c.X, c.Y, 0), (c.X + 5, c.Y + 5, 0)],
+                         draft=draft, label=f"H{i+1}")
+    labels.append(mark)
 
 visible, _ = plate.project_to_viewport((0, 0, 100), (0, 1, 0), (0, 0, 0))
 result = Compound(children=list(visible) + labels)
@@ -418,7 +420,7 @@ show(result, "clean_svg_demo")""",
 # For font_size=2.5 with decimal_precision=1, a label like "127.5" is ~10 mm
 # wide. An 8 mm step keeps witness lines clear of the next dim's text.
 from build123d import *
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 
 draft = Draft(font_size=2.5, decimal_precision=1)
 
@@ -427,10 +429,10 @@ visible, _ = plate.project_to_viewport((0, 0, 100), (0, 1, 0), (0, 0, 0))
 show(Compound(children=list(visible)), "plate")
 
 # Three stacked dims on the bottom edge — offsets 10, 18, 26 mm
-total  = dim_linear((-40, -25, 0), (40, -25, 0), "below", 10, draft, label="80")
-left   = dim_linear((-40, -25, 0), ( 0, -25, 0), "below", 18, draft, label="40")
-right  = dim_linear((  0, -25, 0), (40, -25, 0), "below", 26, draft, label="40")
-height = dim_linear(( 40, -25, 0), (40,  25, 0), "right", 10, draft, label="50")
+total  = Dimension((-40, -25, 0), (40, -25, 0), "below", 10, draft, label="80")
+left   = Dimension((-40, -25, 0), ( 0, -25, 0), "below", 18, draft, label="40")
+right  = Dimension((  0, -25, 0), (40, -25, 0), "below", 26, draft, label="40")
+height = Dimension(( 40, -25, 0), (40,  25, 0), "right", 10, draft, label="50")
 
 annotate(total,  "total_width",  label="80")
 annotate(left,   "left_half",    label="40")
@@ -445,7 +447,7 @@ set_page(297, 210, margin=10)
 # lint_drawing() now checks both overlap AND page bounds automatically.
 # Run it after placing all dims — before rendering or exporting.
 
-result = Compound(children=list(visible) + [total.shape, left.shape, right.shape, height.shape])
+result = Compound(children=list(visible) + [total, left, right, height])
 show(result, "stacked_dims_demo")""",
     ),
 
@@ -453,8 +455,8 @@ show(result, "stacked_dims_demo")""",
         text="""\
 ## CENTERLINE-LABEL COLLISION AVOIDANCE
 ## =====================================
-## Problem: when a dim line crosses a centerline at the label's midpoint, the
-## label text overlaps the centerline — most visible on diameter dims (Ø5.0 H8)
+## Problem: when a dim line crosses a Centerline at the label's midpoint, the
+## label text overlaps the Centerline — most visible on diameter dims (Ø5.0 H8)
 ## where the dim line passes through the bore centre.
 ##
 ## Detection: register centerlines with register_centerline(shape, name) so
@@ -462,23 +464,23 @@ show(result, "stacked_dims_demo")""",
 ##
 ## Fix options:
 ##   1. Shift the label along the dim line away from the crossing:
-##        d = dim_linear(p1, p2, "above", 8, draft, label="Ø5.0 H8", label_offset_x=15)
+##        d = Dimension(p1, p2, "above", 8, draft, label="Ø5.0 H8", label_offset_x=15)
 ##      label_offset_x is a signed distance from the midpoint (mm). Positive
 ##      shifts toward p2; negative shifts toward p1.
 ##
-##   2. Replace the inline label with a leader annotation pointing to the feature:
-##        ann = leader(tip=(0, 0, 0), elbow=(20, 12, 0), label="Ø5.0 H8", draft=draft)
+##   2. Replace the inline label with a Leader annotation pointing to the feature:
+##        ann = Leader(tip=(0, 0, 0), elbow=(20, 12, 0), label="Ø5.0 H8", draft=draft)
 ##        annotate(ann, "bore_dim")
-##      A leader always places its text to one side of the tip, never across it.
+##      A Leader always places its text to one side of the tip, never across it.
 ##
-##   3. Increase the dim offset so the dim line clears the centerline region:
-##        d = dim_linear(p1, p2, "above", 20, draft, label="Ø5.0 H8")
+##   3. Increase the dim offset so the dim line clears the Centerline region:
+##        d = Dimension(p1, p2, "above", 20, draft, label="Ø5.0 H8")
 ##      Only works if the dim layout has room for a larger offset.
 ##
 ## Lint workflow:
 ##   cl = Edge.make_line((0, -50, 0), (0, 50, 0))  # vertical centreline through bore
 ##   register_centerline(Compound(children=[cl]), "bore_cl")
-##   d = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="Ø5.0 H8")
+##   d = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="Ø5.0 H8")
 ##   annotate(d, "bore_dim")
 ##   lint_drawing()  # → label_centerline_overlap warning if label crosses bore_cl"""
     ),
@@ -490,11 +492,11 @@ show(result, "stacked_dims_demo")""",
 # build123d.drafting ships no GD&T primitives, and the geometric-characteristic
 # glyphs (⌖ ⊥ ∥ ◎ …) and surface-finish ticks are absent from CAD-safe fonts —
 # so build123d-drafting-helpers (>=0.1.7) draws them geometrically. Each helper
-# builds at the origin; move it into place with .shape.moved(loc), and route
+# builds at the origin; move it into place with .moved(loc), and route
 # .lines / .text to separate SVG layers when you need ISO line/fill colours.
 from build123d import *
 from build123d_drafting import (
-    feature_control_frame, datum_feature, surface_finish_mark,
+    FeatureControlFrame, DatumFeature, SurfaceFinish,
 )
 
 draft = Draft(font_size=2.5, decimal_precision=2)
@@ -503,23 +505,23 @@ draft = Draft(font_size=2.5, decimal_precision=2)
 # characteristic is one of 14 names ("position", "flatness", "perpendicularity",
 # "concentricity", "circular_runout", ...). diameter=True prepends ⌀;
 # modifier="M"/"L"/"P" = MMC/LMC/projected (None = RFS).
-fcf = feature_control_frame(
+fcf = FeatureControlFrame(
     "position", 0.5, datums=("A", "B", "C"),
     draft=draft, diameter=True, modifier="M",
 )
 
 # Datum feature symbol (filled triangle + framed letter), tip at the origin.
-datum_a = datum_feature("A", draft=draft)
+datum_a = DatumFeature("A", draft=draft)
 
 # Surface finish mark with an Ra value, placed at a point (ISO 1302).
-finish = surface_finish_mark("1.6", position=(60, 0, 0), draft=draft)
+finish = SurfaceFinish("1.6", position=(60, 0, 0), draft=draft)
 
 # In a real drawing, route .lines and .text to coloured ExportSVG layers; here
-# we just compose .shape for a preview.
+# we just compose the objects for a preview.
 result = Compound(children=[
-    fcf.shape,
-    datum_a.shape.moved(Location((40, 0, 0))),
-    finish.shape,
+    fcf,
+    datum_a.moved(Location((40, 0, 0))),
+    finish,
 ])
 show(result, "gdt_demo")""",
     ),
@@ -530,7 +532,7 @@ show(result, "gdt_demo")""",
 # - No HoleTable class: roll your own via face_inventory + DimensionLine (see above).
 # - GD&T symbols (feature control frames, datum features, surface finish marks)
 #   and an ISO 7200 title block now live in build123d-drafting-helpers — see the
-#   GD&T recipe above; iso_title_block() covers the title block.
+#   GD&T recipe above; TitleBlock() covers the title block.
 # - No section-view hatching: clip the part with a plane and project the
 #   result, but cross-hatching the cut surface is manual.
 # - No automatic standards selection (ASME Y14.5 vs ISO): the Draft object
@@ -565,7 +567,7 @@ show(result, "gdt_demo")""",
 ## right-hand normal of the path direction a→b. Right-hand normal of
 ## (dx, dy) is (dy, -dx). Reverse the points or flip the offset sign to
 ## put the dim on the other side. The build123d-drafting helper
-## dim_linear() removes this guessing entirely — it takes
+## Dimension() removes this guessing entirely — it takes
 ## side="above"/"below"/"left"/"right" and computes the sign internally.
 ##
 ## 2. DimensionLine crashes when label is wider than the path
@@ -573,7 +575,7 @@ show(result, "gdt_demo")""",
 ## With a path shorter than the label string's pixel width and a path
 ## also too short for the outside-arrows fallback, build123d raises
 ## ValueError: "Can't get geom adaptor of empty wire". Either widen the
-## path, shorten the label, or use build123d-drafting.safe_dim_line()
+## path, shorten the label, or use build123d-drafting.SafeDimension()
 ## which retries with a truncated label rather than raising.
 ##
 ## 3. Text on a layer with fill_color=None renders as outlines
@@ -588,10 +590,10 @@ show(result, "gdt_demo")""",
 ##
 ## 4. Leader lines need a gap before the label
 ##
-## A leader line that runs straight up to the label's bounding box
+## A Leader line that runs straight up to the label's bounding box
 ## visually strikes through the first character. Stop the line ~1 mm
 ## before the label or insert a horizontal shelf segment.
-## build123d-drafting.leader() handles this automatically; the lint
+## build123d-drafting.Leader() handles this automatically; the lint
 ## tool's leader_elbow_in_label check catches it after the fact.
 ##
 ## 5. View-axis swap in non-top projections

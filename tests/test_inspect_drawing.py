@@ -19,9 +19,9 @@ class TestAnnotate:
         session.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+w = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
 annotate(w, "width")
 """)
         assert "width" in session.objects
@@ -30,9 +30,9 @@ annotate(w, "width")
         session.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+w = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
 annotate(w, "width")
 """)
         ann = session.drawing_annotations.get("width")
@@ -44,9 +44,9 @@ annotate(w, "width")
         session.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import leader
+from build123d_drafting import Leader
 draft = Draft(font_size=2.5, decimal_precision=1)
-lea = leader((5, 5, 0), (20, 12, 0), "Ra 1.6", draft)
+lea = Leader((5, 5, 0), (20, 12, 0), "Ra 1.6", draft)
 annotate(lea, "ra_mark")
 """)
         ann = session.drawing_annotations.get("ra_mark")
@@ -59,9 +59,9 @@ annotate(lea, "ra_mark")
         session.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+w = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
 annotate(w, "width")
 """)
         session.reset()
@@ -71,9 +71,9 @@ annotate(w, "width")
         session.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+w = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
 annotate(w, "width")
 """)
         # Now execute bad code that should roll back
@@ -166,9 +166,9 @@ annotate(bad, "axis_swap_bug")   # no label= kwarg
         session.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+w = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
 annotate(w, "width", label="WRONG")
 """)
         ann = session.drawing_annotations.get("width")
@@ -211,9 +211,9 @@ show(Compound(children=list(visible)), "part_view")
         session.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+w = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
 annotate(w, "width")
 """)
         result = self._run(session)
@@ -234,10 +234,10 @@ show(Box(10, 10, 10), "box")
         session.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-w = dim_linear((-20, -10, 0), (20, -10, 0), "below", 8, draft, label="40")
-h = dim_linear((20, -10, 0), (20, 10, 0), "right", 8, draft, label="20")
+w = Dimension((-20, -10, 0), (20, -10, 0), "below", 8, draft, label="40")
+h = Dimension((20, -10, 0), (20, 10, 0), "right", 8, draft, label="20")
 annotate(w, "width")
 annotate(h, "height")
 """)
@@ -250,10 +250,10 @@ annotate(h, "height")
         session.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
-h = dim_linear((0, -10, 0), (0, 10, 0), "right", 8, draft, label="20")
+w = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+h = Dimension((0, -10, 0), (0, 10, 0), "right", 8, draft, label="20")
 annotate(w, "width")
 annotate(h, "height")
 """)
@@ -265,10 +265,10 @@ annotate(h, "height")
         session.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
 # Label says 35 but segment is 20 mm — should be flagged
-w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="35")
+w = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="35")
 annotate(w, "wrong_dim")
 """)
         result = self._run(session)
@@ -279,9 +279,9 @@ annotate(w, "wrong_dim")
         session.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+w = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
 annotate(w, "width")
 """)
         result = self._run(session)
@@ -304,9 +304,9 @@ class TestInspectDrawingViaWorker:
             ws.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+w = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
 annotate(w, "width")
 """)
             payload = json.loads(ws.inspect_drawing())
@@ -355,9 +355,9 @@ annotate(el, "dim", label="40")
         session.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="custom")
+w = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="custom")
 annotate(w, "width")
 """)
         ann = session.drawing_annotations.get("width")
@@ -379,9 +379,9 @@ class TestSaveDrawingAnnotations:
         session.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+w = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
 annotate(w, "width")
 """)
         svg_path = str(tmp_path / "drawing.svg")
@@ -396,9 +396,9 @@ annotate(w, "width")
         session.execute("""
 from build123d import *
 from build123d import Draft
-from build123d_drafting import dim_linear
+from build123d_drafting import Dimension
 draft = Draft(font_size=2.5, decimal_precision=1)
-w = dim_linear((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
+w = Dimension((-10, 0, 0), (10, 0, 0), "above", 8, draft, label="20")
 annotate(w, "width")
 """)
         svg_path = str(tmp_path / "drawing.svg")

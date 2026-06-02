@@ -121,7 +121,7 @@ def inspect_drawing(objects: str = "", svg_path: str = "") -> str:
 
     1. Session mode (default): inspects objects registered via annotate()/show().
        Returns per-object bounding boxes, face/edge counts, annotation metadata
-       (label string, measured length, leader tip/elbow), and structural lint.
+       (label string, measured length, Leader tip/elbow), and structural lint.
 
     2. SVG mode (svg_path set): parses an SVG file from disk and reports page
        size, layer ids, text content + positions, and element counts. Decouples
@@ -131,9 +131,9 @@ def inspect_drawing(objects: str = "", svg_path: str = "") -> str:
     Use annotate(result, name) instead of show(result.shape, name) when building
     with build123d_drafting so metadata is captured:
 
-        from build123d_drafting import dim_linear, Draft
+        from build123d_drafting import Dimension, Draft
         draft = Draft(font_size=2.5, decimal_precision=1)
-        w = dim_linear((-20, -10, 0), (20, -10, 0), "below", 8, draft, label="40")
+        w = Dimension((-20, -10, 0), (20, -10, 0), "below", 8, draft, label="40")
         annotate(w, "width_dim")
 
     For vanilla build123d.ExtensionLine/DimensionLine, pass the label explicitly:
@@ -174,7 +174,7 @@ def lint_drawing(svg_path: str = "") -> str:
 
     Session mode (default): reconstructs the session's annotations and delegates
     to build123d-drafting-helpers (lint_drawing + find_interferences) — single
-    source of truth. Surfaces label-vs-measured divergence (axis swap), leader
+    source of truth. Surfaces label-vs-measured divergence (axis swap), Leader
     line through its own label, annotation/label overlap, a witness/extension
     line piercing a neighbour's label, redundant collinear lines, and page-bounds
     overshoot.
@@ -243,7 +243,7 @@ def save_drawing_annotations(svg_path: str) -> str:
     inspect_drawing(svg_path=...) to restore annotation content.
 
     Workflow:
-        1. Build your drawing with dim_linear / leader / annotate()
+        1. Build your drawing with Dimension / Leader / annotate()
         2. Export SVG:  execute("exporter.write('drawing.svg')")
         3. Save metadata: save_drawing_annotations("drawing.svg")
         4. Inspect later: inspect_drawing(svg_path="drawing.svg")
