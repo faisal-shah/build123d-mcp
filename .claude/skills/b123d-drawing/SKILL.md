@@ -22,14 +22,19 @@ Note the bounding-box extents. These drive layout decisions below.
 
 ## Step 1 — Choose views (third-angle projection)
 
-Standard four-view layout for A4 landscape (297 × 210 mm):
+Standard four-view layout. Page size is chosen in Step 2 based on part extents
+(A4 landscape 297 × 210 mm for most parts; A3 landscape 420 × 297 mm for large ones).
 
 | View | Camera position | Up vector | Role |
 |------|-----------------|-----------|------|
 | Main (front/side) | face the longest axis | +Z or +Y | primary dims |
 | Left/right end | +X or -X | +Z | cross-section / bore |
 | Plan (top) | +Z | +Y | footprint |
-| Isometric | (80,80,80) or (100,-100,100) | +Z | pictorial, no dims |
+| Isometric | (80, 80, 80) | (0, 0, 1) | pictorial, no dims |
+
+The isometric position `(80, 80, 80)` gives the standard equal-axis view. Negate one
+axis (e.g. `(-80, 80, 80)`) to flip the pictorial orientation when a key feature is
+otherwise hidden.
 
 Verify axis mapping **before** placing any dimensions:
 
@@ -43,17 +48,38 @@ coordinate helpers.
 
 ---
 
-## Step 2 — Scale and project
+## Step 2 — Choose page size and scale, then project
+
+Pick `SCALE` and page dimensions so the scaled longest dimension fits comfortably
+within the usable page width (≈ page width − 20 mm margins). Use the bounding-box
+`x_size / y_size / z_size` values from `measure()` in Step 0.
 
 ```python
-SCALE = 2.0          # 2:1 for small components; 1:1 for assemblies
-part_2x = part.scale(SCALE)
+bbox_max = max(x_size, y_size, z_size)   # longest world dimension in mm
 
-# look_at must be in 2x space for scaled views; 1x space for the iso
-look_at_2x = (cx * SCALE, cy * SCALE, cz * SCALE)
+# Rule of thumb: scaled bbox_max should be ≤ 60 % of usable page length
+if   bbox_max * 2.0 <= 170:
+    SCALE, PAGE_W, PAGE_H = 2.0, 297.0, 210.0   # A4 2:1  — small parts
+elif bbox_max * 1.0 <= 170:
+    SCALE, PAGE_W, PAGE_H = 1.0, 297.0, 210.0   # A4 1:1
+elif bbox_max * 1.0 <= 260:
+    SCALE, PAGE_W, PAGE_H = 1.0, 420.0, 297.0   # A3 1:1  — larger parts
+else:
+    SCALE, PAGE_W, PAGE_H = 0.5, 420.0, 297.0   # A3 1:2  — very large parts
+```
 
-vis, hid = part_2x.project_to_viewport(camera_pos, up, look_at_2x)
-iso_vis, iso_hid = part.project_to_viewport((80, 80, 80), (0,0,1), (cx, cy, cz))
+Then project:
+
+```python
+part_scaled = part.scale(SCALE)
+
+# look_at in scaled space for orthographic views; unscaled for iso
+look_at_s = (cx * SCALE, cy * SCALE, cz * SCALE)
+
+vis, hid = part_scaled.project_to_viewport(camera_pos, up, look_at_s)
+if not list(vis):
+    raise ValueError(f"project_to_viewport returned empty geometry for camera {camera_pos} — check camera position and look_at")
+iso_vis, iso_hid = part.project_to_viewport((80, 80, 80), (0, 0, 1), (cx, cy, cz))
 ```
 
 Place each projected compound at its sheet position:
@@ -138,9 +164,13 @@ export will not see it.
 
 ## Step 5 — Lint gate (run before export)
 
+Note: `lint_drawing` here is called from `build123d_drafting` (imported in Step 4),
+not the MCP tool `mcp__build123d-mcp__lint_drawing`. The Python function accepts the
+annotation list and scale directly; the MCP tool reads from session state instead.
+
 ```python
 all_anns = list(dims) + [ldr1, ldr2, tb]
-set_page(297, 210, margin=10)
+set_page(PAGE_W, PAGE_H, margin=10)   # PAGE_W / PAGE_H set in Step 2
 issues = lint_drawing(all_anns, drawing_scale=SCALE)
 if issues:
     for iss in issues:
@@ -180,7 +210,23 @@ for ann in all_anns:
 svg_exp.write(str(output_dir / "part_name.svg"))
 ```
 
-Repeat with `ExportDXF` (same layers, no `line_color`/`fill_color` args).
+Then export DXF (same layer structure; omit `line_color`, `fill_color`, and `line_type` args):
+
+```python
+from build123d import ExportDXF
+
+dxf_exp = ExportDXF()
+dxf_exp.add_layer("part",   line_weight=0.5)
+dxf_exp.add_layer("hidden", line_weight=0.25)
+dxf_exp.add_layer("dims",   line_weight=0.05)
+for shape in [view1, view2, view3, iso]:
+    dxf_exp.add_shape(shape, layer="part")
+for shape in [s for s in [v1_h, v2_h, v3_h, iso_h] if s]:
+    dxf_exp.add_shape(shape, layer="hidden")
+for ann in all_anns:
+    dxf_exp.add_shape(ann, layer="dims")
+dxf_exp.write(str(output_dir / "part_name.dxf"))
+```
 
 ---
 
@@ -197,28 +243,38 @@ Send with `[SEND: /tmp/dwg.png]` for user review before moving on.
 ## Step 8 — Combine into a PDF (optional)
 
 To assemble multiple drawing SVGs into a single multi-page PDF, rasterise each
-SVG at 200 DPI using `resvg-py` and combine pages with `fpdf2`:
+SVG at 200 DPI using `resvg-py` and combine pages with `fpdf2`.
+
+`PAGE_W` and `PAGE_H` are the values chosen in Step 2 (e.g. 297/210 for A4 or
+420/297 for A3 landscape). Use them throughout so the PDF matches the drawing sheet.
 
 ```python
 import resvg_py
 from fpdf import FPDF
 
+# PAGE_W, PAGE_H set in Step 2
+fmt = "A4" if PAGE_W < 400 else "A3"
+
 png_bytes = resvg_py.svg_to_bytes(svg_path=str(svg_path), dpi=200)
 
-pdf = FPDF(orientation="L", unit="mm", format="A4")
+pdf = FPDF(orientation="L", unit="mm", format=fmt)
 pdf.add_page()
-pdf.image(tmp_png_path, x=0, y=0, w=297, h=210)
+pdf.image(tmp_png_path, x=0, y=0, w=PAGE_W, h=PAGE_H)
 pdf.output("drawings/output.pdf")
 ```
 
 build123d `ExportSVG` writes Y-up coordinates; the `viewBox` origin encodes
-where content sits on the A4 sheet. To recover the correct Y position for
-PDF (Y-down, top-left origin):
+where content sits on the sheet. To recover the correct Y position for PDF
+(Y-down, top-left origin):
 
 ```python
-vb_y = float(svg_root.get("viewBox").split()[1])   # negative in drawing coords
-pdf_y = 210.0 - abs(vb_y)
+vb_y = float(svg_root.get("viewBox").split()[1])   # negative in Y-up drawing coords
+assert vb_y <= 0, f"Unexpected positive viewBox Y: {vb_y} — check ExportSVG output"
+pdf_y = PAGE_H - abs(vb_y)
 ```
+
+If the assert fires, the SVG was generated with a different coordinate convention;
+inspect the `viewBox` before placing the image.
 
 ---
 
