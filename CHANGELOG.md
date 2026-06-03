@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.3.33 — 2026-06-03
+
+### Added
+
+- **`build123d-mcp install-skill`** — new CLI subcommand that copies the bundled
+  `b123d-drawing` Claude Code skill into `.claude/skills/b123d-drawing/` of the
+  user's current project. The skill ships inside the PyPI wheel via
+  `importlib.resources`; use `--force` to overwrite an existing installation.
+- **`b123d-drawing` Claude Code skill** — step-by-step workflow for creating
+  engineering drawings from build123d geometry (views, scale/page-size heuristic,
+  annotation, lint gate, SVG/DXF/PDF export).
+
+### Fixed
+
+- Skill: added adaptive scale and page-size heuristic (A4 2:1 → A3 1:2 based on
+  bounding box); parameterised `PAGE_W`/`PAGE_H` throughout including the PDF
+  `pdf_y` formula which was previously hardcoded to A4.
+- Skill: added `ExportDXF` code example, clarified `lint_drawing` is a Python
+  library call not an MCP tool, added empty-compound guard after
+  `project_to_viewport`, and resolved isometric camera position ambiguity.
+
 ## v0.3.32 — 2026-06-02
 
 ### Added
