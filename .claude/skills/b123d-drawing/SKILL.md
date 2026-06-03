@@ -1,0 +1,1 @@
+../../../src/build123d_mcp/skills/b123d-drawing/SKILL.md

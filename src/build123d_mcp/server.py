@@ -582,15 +582,52 @@ Call workflow_hints() if unsure which tool to use next.
     return [PromptMessage(role="user", content=TextContent(type="text", text=text))]
 
 
+def _cmd_install_skill(argv: list) -> None:
+    import argparse
+    import sys
+    from importlib.resources import files
+    from pathlib import Path
+
+    p = argparse.ArgumentParser(
+        prog="build123d-mcp install-skill",
+        description="Copy the b123d-drawing Claude Code skill into .claude/skills/ of the current directory.",
+    )
+    p.add_argument("--force", action="store_true", help="Overwrite existing skill files without prompting")
+    args = p.parse_args(argv)
+
+    dest = Path.cwd() / ".claude" / "skills" / "b123d-drawing"
+    if dest.exists() and not args.force:
+        print(f"Skill already installed at {dest}\nUse --force to overwrite.", file=sys.stderr)
+        sys.exit(1)
+
+    skill_pkg = files("build123d_mcp") / "skills" / "b123d-drawing"
+    dest.mkdir(parents=True, exist_ok=True)
+    for fname in ["SKILL.md"]:
+        content = (skill_pkg / fname).read_text(encoding="utf-8")
+        (dest / fname).write_text(content, encoding="utf-8")
+
+    print(f"Installed b123d-drawing skill → {dest}")
+
+
 def main():
     import argparse
     import os
+    import sys
     from importlib.metadata import version
+
+    if len(sys.argv) > 1 and sys.argv[1] == "install-skill":
+        _cmd_install_skill(sys.argv[2:])
+        return
+
     parser = argparse.ArgumentParser(
         prog="build123d-mcp",
         description="MCP server for interactive 3D CAD via build123d. Communicates over stdio.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
+Subcommands:
+  install-skill     Copy the b123d-drawing Claude Code skill into .claude/skills/ of the current project
+                    Usage: build123d-mcp install-skill [--force]
+
 MCP client configuration example:
   {
     "mcpServers": {
