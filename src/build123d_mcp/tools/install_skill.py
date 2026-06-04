@@ -44,9 +44,7 @@ def _cursor_frontmatter() -> str:
     return (
         "---\n"
         "description: Engineering drawing workflow for build123d geometry using the build123d-mcp MCP server\n"
-        "globs:\n"
-        "  - scripts/drawings/**\n"
-        "  - drawings/**\n"
+        'globs: "scripts/drawings/**, drawings/**"\n'
         "alwaysApply: false\n"
         "---\n\n"
     )
@@ -66,6 +64,26 @@ def _replace_or_append(existing: str, new_section: str) -> str:
     if pattern.search(existing):
         return pattern.sub(new_section.rstrip(), existing, count=1)
     return existing.rstrip() + "\n\n" + new_section
+
+
+def _dest_exists(target: str, cwd: Path | None = None) -> bool:
+    """Return True if the skill is already installed for *target*.
+
+    NOTE: the file-path logic here must stay in sync with install_skill() below.
+    If you change a target's destination path, update both functions.
+    """
+    base = cwd or Path.cwd()
+    if target == "claude":
+        return (base / ".claude" / "skills" / "b123d-drawing" / "SKILL.md").exists()
+    if target == "agents-md":
+        f = base / "AGENTS.md"
+        return f.exists() and _START in f.read_text(encoding="utf-8")
+    if target == "cursor":
+        return (base / ".cursor" / "rules" / "b123d-drawing.mdc").exists()
+    if target == "windsurf":
+        f = base / ".windsurfrules"
+        return f.exists() and _START in f.read_text(encoding="utf-8")
+    return False
 
 
 def install_skill(target: str = "claude", force: bool = False, cwd: Path | None = None) -> str:
