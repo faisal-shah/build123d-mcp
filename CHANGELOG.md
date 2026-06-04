@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.3.35 — 2026-06-04
+
+### Added
+
+- **`suggest_view_layout`** — new MCP tool that auto-calculates `VIEW_X`/`VIEW_Y`
+  positions for a standard four-view third-angle engineering drawing. Returns per-view
+  page positions, `look_at`, camera/up vectors, fit warnings, and a scale/page
+  suggestion if the layout doesn't fit. Front/plan/side positions are exact;
+  iso is an approximation (caveat documented). Closes #162.
+- **`view_axes`** now returns `look_at_offset` and `helper_snippet` — the look_at
+  world component per page axis and ready-to-paste coordinate helpers that incorporate
+  the centroid offset. Eliminates the systematic annotation shift caused by omitting
+  the look_at term. Closes #158.
+
+### Fixed
+
+- **`execute`** now appends `# vars: key=val, ...` to each successful execution's
+  output, listing new/changed scalar variables. Makes repeated similar calls produce
+  distinct output, preventing Claude Code's context compression from collapsing
+  stale results into indistinguishable `<<ccr:...>>` references. Closes #161.
+
 ## v0.3.34 — 2026-06-04
 
 ### Added
