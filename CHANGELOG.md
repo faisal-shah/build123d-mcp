@@ -1,5 +1,30 @@
 # Changelog
 
+## v0.3.34 — 2026-06-04
+
+### Added
+
+- **`install_skill` MCP tool** — any MCP-capable agent (Claude Code, Codex CLI,
+  Antigravity, Cursor, Windsurf) can call `install_skill(target, force=False)` to
+  write the b123d-drawing workflow into the current project. Supported targets:
+  `claude` (`.claude/skills/`), `agents-md` (`AGENTS.md`), `cursor`
+  (`.cursor/rules/b123d-drawing.mdc`), `windsurf` (`.windsurfrules`).
+- **`build123d://skill/drawing` MCP resource** — exposes the full drawing workflow
+  for agents to read without installing.
+- **`build123d-mcp install-skill --target <agent>`** — CLI gains `--target` flag;
+  defaults to `claude` (backward-compatible).
+- **`workflow_hints()`** now mentions `install_skill` and the skill resource in the
+  2D drawings section.
+
+### Fixed
+
+- Cursor `.mdc` `globs` field was emitting an invalid YAML block list; corrected to
+  a quoted comma-separated string so path scoping actually works.
+- CLI `install-skill` exit logic replaced fragile `"already" in message` string-match
+  with a `_dest_exists()` pre-check.
+- Claude Code-specific markers (`[SEND:]`, `[ASK:]`) are stripped when writing
+  `agents-md`, `cursor`, and `windsurf` targets.
+
 ## v0.3.33 — 2026-06-03
 
 ### Added
