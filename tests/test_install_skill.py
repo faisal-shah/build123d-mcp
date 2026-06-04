@@ -1,14 +1,12 @@
 """Tests for the install_skill tool (all four targets)."""
 
-import re
 from pathlib import Path
-
-import pytest
 
 from build123d_mcp.tools.install_skill import (
     TARGETS,
     _END,
     _START,
+    _dest_exists,
     _load_raw,
     _strip_claude_markers,
     install_skill,
@@ -145,6 +143,9 @@ def test_install_cursor_creates_mdc(tmp_path):
     assert "Engineering Drawing" in content
     assert "[SEND:" not in content
     assert "Installed" in result
+    # globs must be a quoted string, not a YAML block list
+    assert 'globs: "' in content
+    assert "  - " not in content.split("---")[1]  # no YAML list items in frontmatter
 
 
 def test_install_cursor_no_overwrite(tmp_path):
@@ -187,6 +188,25 @@ def test_install_windsurf_force_replaces_section(tmp_path):
     install_skill(target="windsurf", force=True, cwd=tmp_path)
     content = _read(tmp_path / ".windsurfrules")
     assert content.count(_START) == 1
+
+
+# ---------------------------------------------------------------------------
+# _dest_exists
+# ---------------------------------------------------------------------------
+
+def test_dest_exists_false_before_install(tmp_path):
+    for target in TARGETS:
+        assert not _dest_exists(target, cwd=tmp_path)
+
+
+def test_dest_exists_true_after_install(tmp_path):
+    for target in TARGETS:
+        install_skill(target=target, cwd=tmp_path)
+        assert _dest_exists(target, cwd=tmp_path)
+
+
+def test_dest_exists_unknown_target():
+    assert not _dest_exists("unknown")
 
 
 # ---------------------------------------------------------------------------

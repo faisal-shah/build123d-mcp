@@ -470,6 +470,11 @@ BUILD123D-MCP WORKFLOW GUIDE
    default line_width=0.5 and arrow_length=3.0 make witness lines render as
    thick filled rectangles. Override every parameter, not just font_size.
 
+   For a guided multi-view drawing workflow (choose views, scale/page size,
+   annotate, lint, export SVG/DXF/PDF), call install_skill() to write a
+   step-by-step skill file into the current project, or read the skill directly
+   from the build123d://skill/drawing resource.
+
 11. IMPORTING EXTERNAL FILES
    After import_cad_file(), the shape is a named object — use render_view(objects="name")
    to visualise it. If the session also contains the original built shape at the same
@@ -626,11 +631,12 @@ def _cmd_install_skill(argv: list) -> None:
     p.add_argument("--force", action="store_true", help="Overwrite existing installation")
     args = p.parse_args(argv)
 
-    result = _install(target=args.target, force=args.force)
-    if "already" in result.lower() and not args.force:
-        print(result, file=sys.stderr)
+    from build123d_mcp.tools.install_skill import _dest_exists
+    if not args.force and _dest_exists(args.target):
+        # Print what install_skill would say, then exit non-zero.
+        print(_install(target=args.target, force=False), file=sys.stderr)
         sys.exit(1)
-    print(result)
+    print(_install(target=args.target, force=args.force))
 
 
 def main():
