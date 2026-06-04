@@ -578,6 +578,10 @@ def suggest_view_layout(
     views: subset of ["front","plan","side","iso"] to place
     title_block_w/h: reserved bottom-right area (default 150×30 mm)
     margin: page margin in mm (default 10)
+
+    Accuracy: front/plan/side positions are exact for orthographic projection.
+    Iso position is approximate (75% of 3-D diagonal as half-extent) — verify
+    with render_view() and adjust manually if the iso overlaps a neighbour.
     """
     from build123d_mcp.tools.suggest_view_layout import suggest_view_layout as _fn
     return _fn(_session, object_name, page_w, page_h, scale, views,

@@ -48,7 +48,10 @@ def _page_half_extents(
     if view == "side":
         return sy, sz
     if view == "iso":
-        # Conservative approximation: project 3-D diagonal onto page.
+        # APPROXIMATE: uses 75% of the 3-D bounding-box diagonal as the half-extent.
+        # This is a heuristic — actual projected size depends on part shape and the
+        # isometric camera angle. For elongated or complex parts it may be 20–40% off.
+        # Treat the iso position as a starting point and verify with render_view.
         half = math.sqrt(x**2 + y**2 + z**2) * scale / 2 * 0.75
         return half, half
     return sx, sz  # fallback
@@ -156,6 +159,17 @@ def suggest_view_layout(
     Returns JSON with per-view positions, camera/up/look_at values, and any
     warnings (out-of-bounds, title-block overlap).  If the layout does not fit,
     an alternative scale or page size is suggested.
+
+    ACCURACY NOTES
+    --------------
+    Front, plan, and side views: estimates are exact for orthographic projection.
+    The bounding-box half-extents map directly to page extents when look_at is at
+    the part centroid, so the positions are reliable for any convex or concave part.
+
+    Iso view: position is approximate. The tool uses 75% of the 3-D bounding-box
+    diagonal as the page half-extent. For elongated or complex parts this can be
+    20–40% off.  Treat the iso VIEW_X / VIEW_Y as a starting point and verify with
+    render_view() — adjust manually if the iso overlaps a neighbour.
     """
     if views is None:
         views = ["front", "plan", "side", "iso"]
