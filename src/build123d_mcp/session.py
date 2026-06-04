@@ -393,6 +393,15 @@ class Session:
                 output = output.rstrip("\n") + "\n" + diag
             for w in warnings:
                 output += "\n" + w
+
+        # Append a summary of new/changed scalar variables so the caller can verify
+        # that assignments took effect. This makes each execution's output distinct
+        # even when the code structure is similar, preventing stale context references
+        # from being silently mistaken for a successful re-run with updated values.
+        var_summary = self._summarise_var_changes(values_before)
+        if var_summary:
+            output = output.rstrip("\n") + "\n# vars: " + var_summary
+
         return output
 
     def _rollback_namespace(self, values_before: dict[str, Any]) -> None:
@@ -480,6 +489,37 @@ class Session:
         self.current_shape = snap["current_shape"]
         self.objects.clear()
         self.objects.update(snap["objects"])
+
+    def _summarise_var_changes(self, before: dict) -> str:
+        """Return a compact summary of scalar variables added or changed since *before*.
+
+        Only covers simple value types (bool, int, float, complex, str, tuple).
+        Shapes, functions, modules, and private names are excluded — shapes are
+        already reported by the shape diagnostic.
+        """
+        _SCALAR = (bool, int, float, complex, str, bytes)
+        _sentinel = object()
+        changed = []
+        for k in sorted(self.namespace):
+            if k in _INJECTED or k.startswith("_"):
+                continue
+            v = self.namespace[k]
+            if isinstance(v, tuple):
+                if not all(isinstance(e, _SCALAR) for e in v):
+                    continue
+            elif not isinstance(v, _SCALAR):
+                continue
+            old = before.get(k, _sentinel)
+            try:
+                same = old is not _sentinel and old == v
+            except Exception:
+                same = False
+            if not same:
+                r = repr(v)
+                if len(r) > 60:
+                    r = r[:57] + "..."
+                changed.append(f"{k}={r}")
+        return ", ".join(changed)
 
     def reset(self) -> None:
         self.namespace.clear()

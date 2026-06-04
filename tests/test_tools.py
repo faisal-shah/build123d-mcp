@@ -70,6 +70,68 @@ def test_execute_success_has_no_hint(session):
     assert "Hint:" not in result
 
 
+# --- var summary ---
+
+def test_execute_var_summary_shows_new_scalar(session):
+    result = execute_code(session, "FV_Y = 35.0")
+    assert "# vars:" in result
+    assert "FV_Y=35.0" in result
+
+
+def test_execute_var_summary_distinct_for_different_values(session):
+    r1 = execute_code(session, "FV_Y = 35.0")
+    r2 = execute_code(session, "FV_Y = 47.0")
+    assert r1 != r2
+    assert "FV_Y=47.0" in r2
+
+
+def test_execute_var_summary_unchanged_var_not_repeated(session):
+    execute_code(session, "x = 1")
+    result = execute_code(session, "x = 1")
+    assert "x=" not in result
+
+
+def test_execute_var_summary_multiple_vars(session):
+    result = execute_code(session, "SCALE = 2.0\nPAGE_W = 297.0")
+    assert "SCALE=2.0" in result
+    assert "PAGE_W=297.0" in result
+
+
+def test_execute_var_summary_skips_shapes(session):
+    result = execute_code(session, "result = Box(1, 1, 1)")
+    # shapes are reported in the shape diagnostic, not the var summary line
+    var_line = next((l for l in result.splitlines() if l.startswith("# vars:")), "")
+    assert "Box" not in var_line
+
+
+def test_execute_var_summary_skips_private_names(session):
+    result = execute_code(session, "_hidden = 99")
+    assert "_hidden=" not in result
+
+
+def test_execute_var_summary_absent_on_error(session):
+    result = execute_code(session, "bad syntax !!!")
+    assert "# vars:" not in result
+
+
+def test_execute_var_summary_tuple_of_scalars_included(session):
+    result = execute_code(session, "pt = (1.0, 2.0, 3.0)")
+    assert "pt=(1.0, 2.0, 3.0)" in result
+
+
+def test_execute_var_summary_tuple_of_shapes_excluded(session):
+    result = execute_code(session, "from build123d import *\nt = (Box(1,1,1), Box(2,2,2))")
+    var_line = next((l for l in result.splitlines() if l.startswith("# vars:")), "")
+    assert "t=" not in var_line
+
+
+def test_execute_var_summary_long_repr_truncated(session):
+    result = execute_code(session, "s = 'x' * 100")
+    var_line = next((l for l in result.splitlines() if l.startswith("# vars:")), "")
+    assert "..." in var_line
+    assert len(var_line) < 200
+
+
 def test_execute_creates_shape(session):
     execute_code(session, "result = Box(10, 10, 10)")
     assert session.current_shape is not None
