@@ -61,7 +61,6 @@ def _layout(
     x_size: float, y_size: float, z_size: float,
     scale: float,
     views: list[str],
-    page_w: float, page_h: float,
     margin: float,
     title_block_w: float,
     title_block_h: float,
@@ -196,7 +195,7 @@ def suggest_view_layout(
 
     hw = {v: _page_half_extents(v, x_size, y_size, z_size, scale) for v in views}
     pos = _layout(x_size, y_size, z_size, scale, views,
-                  page_w, page_h, margin, title_block_w, title_block_h)
+                  margin, title_block_w, title_block_h)
     warnings = _check_fits(pos, hw, page_w, page_h, margin, title_block_w, title_block_h)
 
     # If the layout doesn't fit, suggest an alternative.
@@ -208,7 +207,7 @@ def suggest_view_layout(
                 if pw < page_w and ph < page_h:
                     continue  # don't suggest smaller pages
                 try_pos = _layout(x_size, y_size, z_size, try_scale, views,
-                                  pw, ph, margin, title_block_w, title_block_h)
+                                  margin, title_block_w, title_block_h)
                 try_hw = {v: _page_half_extents(v, x_size, y_size, z_size, try_scale)
                           for v in views}
                 if not _check_fits(try_pos, try_hw, pw, ph, margin, title_block_w, title_block_h):
@@ -251,8 +250,8 @@ def suggest_view_layout(
     }
     if suggestion:
         result["suggestion"] = suggestion
-    elif warnings:
-        warnings.append(
+    elif result["warnings"]:
+        result["warnings"].append(
             "No automatic fit found — try a smaller scale or a larger page size (A3/A2) manually."
         )
 
