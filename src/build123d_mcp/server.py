@@ -546,6 +546,48 @@ def build123d_bd_warehouse() -> str:
     return build_bd_warehouse_text()
 
 
+@mcp.tool()
+def suggest_view_layout(
+    object_name: str,
+    page_w: float = 297.0,
+    page_h: float = 210.0,
+    scale: float = 1.0,
+    views: list[str] | None = None,
+    title_block_w: float = 150.0,
+    title_block_h: float = 30.0,
+    margin: float = 10.0,
+) -> str:
+    """Auto-calculate safe VIEW_X / VIEW_Y positions for a multi-view engineering drawing.
+
+    Measures the named shape's bounding box and returns per-view page positions
+    (VIEW_X, VIEW_Y), look_at values, and camera/up vectors for a standard
+    third-angle layout:
+
+        [plan ]  [      ]
+        [front]  [ side ] [ iso ]
+                          [ title block (bottom-right) ]
+
+    Returns JSON with:
+      views: {name: {VIEW_X, VIEW_Y, half_w, half_h, look_at, camera, up}}
+      warnings: list of layout problems (out-of-bounds, title-block overlap)
+      suggestion: recommended page_w/page_h/scale if the layout does not fit
+
+    object_name: name from show() — use "" to measure the current shape
+    page_w/page_h: sheet size in mm (default A4 landscape 297×210)
+    scale: drawing scale factor (default 1.0; use 2.0 for 2:1)
+    views: subset of ["front","plan","side","iso"] to place
+    title_block_w/h: reserved bottom-right area (default 150×30 mm)
+    margin: page margin in mm (default 10)
+
+    Accuracy: front/plan/side positions are exact for orthographic projection.
+    Iso position is approximate (75% of 3-D diagonal as half-extent) — verify
+    with render_view() and adjust manually if the iso overlaps a neighbour.
+    """
+    from build123d_mcp.tools.suggest_view_layout import suggest_view_layout as _fn
+    return _fn(_session, object_name, page_w, page_h, scale, views,
+               title_block_w, title_block_h, margin)
+
+
 @mcp.resource("build123d://skill/drawing", mime_type="text/plain",
               description="The b123d-drawing engineering workflow skill: step-by-step guide for creating multi-view engineering drawings from build123d geometry (views, scale, annotation, lint, SVG/DXF/PDF export).")
 def build123d_drawing_skill() -> str:
