@@ -633,8 +633,7 @@ def _cmd_install_skill(argv: list) -> None:
 
     from build123d_mcp.tools.install_skill import _dest_exists
     if not args.force and _dest_exists(args.target):
-        # Print what install_skill would say, then exit non-zero.
-        print(_install(target=args.target, force=False), file=sys.stderr)
+        print(f"Skill already installed for '{args.target}' — use --force to overwrite.", file=sys.stderr)
         sys.exit(1)
     print(_install(target=args.target, force=args.force))
 

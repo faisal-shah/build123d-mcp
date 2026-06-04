@@ -67,7 +67,11 @@ def _replace_or_append(existing: str, new_section: str) -> str:
 
 
 def _dest_exists(target: str, cwd: Path | None = None) -> bool:
-    """Return True if the skill is already installed for *target*."""
+    """Return True if the skill is already installed for *target*.
+
+    NOTE: the file-path logic here must stay in sync with install_skill() below.
+    If you change a target's destination path, update both functions.
+    """
     base = cwd or Path.cwd()
     if target == "claude":
         return (base / ".claude" / "skills" / "b123d-drawing" / "SKILL.md").exists()
