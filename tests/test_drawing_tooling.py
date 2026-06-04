@@ -34,6 +34,51 @@ class TestViewAxes:
         assert result["world_X"][0] == "page_X"
         assert result["world_X"][1] == -1.0
 
+    def test_look_at_offset_zero_at_origin(self):
+        from build123d_mcp.tools.view_axes import view_axes
+        result = json.loads(view_axes((0, 0, 100), (0, 1, 0), (0, 0, 0)))
+        assert "look_at_offset" in result
+        assert result["look_at_offset"]["page_X"] == 0.0
+        assert result["look_at_offset"]["page_Y"] == 0.0
+
+    def test_look_at_offset_front_view_z_centroid(self):
+        """Front view with part centroid at z=-4.65: page_Y offset should be -4.65."""
+        from build123d_mcp.tools.view_axes import view_axes
+        # camera on -Y axis, up=+Z → world_Z maps to page_Y
+        result = json.loads(view_axes((0, -100, 0), (0, 0, 1), (0, 0, -4.65)))
+        assert result["look_at_offset"]["page_Y"] == -4.65
+
+    def test_look_at_offset_top_view_y_centroid(self):
+        """Top view (camera +Z, up +Y): world_Y → page_Y. look_at y=3.0 offset captured."""
+        from build123d_mcp.tools.view_axes import view_axes
+        # Camera on +Z axis, look_at Y=3 → world_Y maps to page_Y → offset = 3.0
+        result = json.loads(view_axes((0, 0, 100), (0, 1, 0), (0, 3.0, 0)))
+        assert result["look_at_offset"]["page_Y"] == 3.0
+        assert result["look_at_offset"]["page_X"] == 0.0
+
+    def test_helper_snippet_present_and_non_empty(self):
+        from build123d_mcp.tools.view_axes import view_axes
+        result = json.loads(view_axes((0, 0, 100), (0, 1, 0), (0, 0, 0)))
+        assert "helper_snippet" in result
+        assert "VIEW_X" in result["helper_snippet"]
+        assert "SCALE" in result["helper_snippet"]
+
+    def test_helper_snippet_includes_offset_when_nonzero(self):
+        """When look_at has a non-zero component, the snippet incorporates the offset."""
+        from build123d_mcp.tools.view_axes import view_axes
+        # Top view: world_X → page_X, world_Y → page_Y, look_at x=3.0
+        result = json.loads(view_axes((0, 0, 100), (0, 1, 0), (3.0, 0, 0)))
+        assert "3.0" in result["helper_snippet"]
+
+    def test_helper_snippet_clean_when_offset_zero(self):
+        """No offset terms when look_at is at origin."""
+        from build123d_mcp.tools.view_axes import view_axes
+        result = json.loads(view_axes((0, 0, 100), (0, 1, 0), (0, 0, 0)))
+        # Clean form: def X(x): return VIEW_X + x * SCALE  (no subtraction)
+        snippet = result["helper_snippet"]
+        assert "- 0" not in snippet
+        assert "+ 0" not in snippet
+
 
 # ---------------------------------------------------------------------------
 # lint_drawing (session mode)
