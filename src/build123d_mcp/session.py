@@ -497,13 +497,17 @@ class Session:
         Shapes, functions, modules, and private names are excluded — shapes are
         already reported by the shape diagnostic.
         """
+        _SCALAR = (bool, int, float, complex, str, bytes)
         _sentinel = object()
         changed = []
         for k in sorted(self.namespace):
             if k in _INJECTED or k.startswith("_"):
                 continue
             v = self.namespace[k]
-            if not isinstance(v, (bool, int, float, complex, str, bytes, tuple)):
+            if isinstance(v, tuple):
+                if not all(isinstance(e, _SCALAR) for e in v):
+                    continue
+            elif not isinstance(v, _SCALAR):
                 continue
             old = before.get(k, _sentinel)
             try:

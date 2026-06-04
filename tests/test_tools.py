@@ -114,6 +114,24 @@ def test_execute_var_summary_absent_on_error(session):
     assert "# vars:" not in result
 
 
+def test_execute_var_summary_tuple_of_scalars_included(session):
+    result = execute_code(session, "pt = (1.0, 2.0, 3.0)")
+    assert "pt=(1.0, 2.0, 3.0)" in result
+
+
+def test_execute_var_summary_tuple_of_shapes_excluded(session):
+    result = execute_code(session, "from build123d import *\nt = (Box(1,1,1), Box(2,2,2))")
+    var_line = next((l for l in result.splitlines() if l.startswith("# vars:")), "")
+    assert "t=" not in var_line
+
+
+def test_execute_var_summary_long_repr_truncated(session):
+    result = execute_code(session, "s = 'x' * 100")
+    var_line = next((l for l in result.splitlines() if l.startswith("# vars:")), "")
+    assert "..." in var_line
+    assert len(var_line) < 200
+
+
 def test_execute_creates_shape(session):
     execute_code(session, "result = Box(10, 10, 10)")
     assert session.current_shape is not None
