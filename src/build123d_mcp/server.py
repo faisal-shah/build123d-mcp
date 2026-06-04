@@ -541,6 +541,32 @@ def build123d_bd_warehouse() -> str:
     return build_bd_warehouse_text()
 
 
+@mcp.resource("build123d://skill/drawing", mime_type="text/plain",
+              description="The b123d-drawing engineering workflow skill: step-by-step guide for creating multi-view engineering drawings from build123d geometry (views, scale, annotation, lint, SVG/DXF/PDF export).")
+def build123d_drawing_skill() -> str:
+    """b123d-drawing engineering workflow skill."""
+    from build123d_mcp.tools.install_skill import _load_raw
+    return _load_raw()
+
+
+@mcp.tool()
+def install_skill(target: str = "claude", force: bool = False) -> str:
+    """Copy the b123d-drawing engineering drawing skill into the current project.
+
+    Writes the appropriate config file for the requested agent so the
+    step-by-step drawing workflow is available in future sessions.
+
+    target: one of "claude" (default), "agents-md", "cursor", "windsurf"
+      - claude     → .claude/skills/b123d-drawing/SKILL.md  (Claude Code)
+      - agents-md  → AGENTS.md  (Codex CLI, Antigravity, GitHub Copilot, Cline)
+      - cursor     → .cursor/rules/b123d-drawing.mdc
+      - windsurf   → .windsurfrules
+    force: overwrite existing installation (default False)
+    """
+    from build123d_mcp.tools.install_skill import install_skill as _install
+    return _install(target=target, force=force)
+
+
 @mcp.prompt(
     name="start-cad-session",
     description="Prime a new CAD design session with the task description and workflow reminders.",
@@ -585,28 +611,26 @@ Call workflow_hints() if unsure which tool to use next.
 def _cmd_install_skill(argv: list) -> None:
     import argparse
     import sys
-    from importlib.resources import files
-    from pathlib import Path
+    from build123d_mcp.tools.install_skill import TARGETS, install_skill as _install
 
     p = argparse.ArgumentParser(
         prog="build123d-mcp install-skill",
-        description="Copy the b123d-drawing Claude Code skill into .claude/skills/ of the current directory.",
+        description="Copy the b123d-drawing skill into the current project for the specified agent.",
     )
-    p.add_argument("--force", action="store_true", help="Overwrite existing skill files without prompting")
+    p.add_argument(
+        "--target",
+        choices=TARGETS,
+        default="claude",
+        help="Agent to install for (default: claude)",
+    )
+    p.add_argument("--force", action="store_true", help="Overwrite existing installation")
     args = p.parse_args(argv)
 
-    dest = Path.cwd() / ".claude" / "skills" / "b123d-drawing"
-    if dest.exists() and not args.force:
-        print(f"Skill already installed at {dest}\nUse --force to overwrite.", file=sys.stderr)
+    result = _install(target=args.target, force=args.force)
+    if "already" in result.lower() and not args.force:
+        print(result, file=sys.stderr)
         sys.exit(1)
-
-    skill_pkg = files("build123d_mcp") / "skills" / "b123d-drawing"
-    dest.mkdir(parents=True, exist_ok=True)
-    for fname in ["SKILL.md"]:
-        content = (skill_pkg / fname).read_text(encoding="utf-8")
-        (dest / fname).write_text(content, encoding="utf-8")
-
-    print(f"Installed b123d-drawing skill → {dest}")
+    print(result)
 
 
 def main():
