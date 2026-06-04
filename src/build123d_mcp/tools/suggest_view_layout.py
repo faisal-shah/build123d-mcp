@@ -178,13 +178,8 @@ def suggest_view_layout(
     if unknown:
         return json.dumps({"error": f"Unknown view(s): {unknown}. Choose from {list(_CAMERAS)}"})
 
-    # Resolve shape from session.
-    shape = session.objects.get(object_name)
-    if shape is None and object_name == "" and session.current_shape is not None:
-        shape = session.current_shape
-    if shape is None:
-        # Try current_shape as fallback when object_name matches nothing.
-        shape = session.current_shape
+    # Resolve shape: named object first, then current_shape as fallback.
+    shape = session.objects.get(object_name) or session.current_shape
     if shape is None:
         return json.dumps({"error": f"Object '{object_name}' not found. Run show() first."})
 
@@ -256,5 +251,9 @@ def suggest_view_layout(
     }
     if suggestion:
         result["suggestion"] = suggestion
+    elif warnings:
+        warnings.append(
+            "No automatic fit found — try a smaller scale or a larger page size (A3/A2) manually."
+        )
 
     return json.dumps(result, indent=2)

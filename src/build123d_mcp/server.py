@@ -552,7 +552,7 @@ def suggest_view_layout(
     page_w: float = 297.0,
     page_h: float = 210.0,
     scale: float = 1.0,
-    views: list[str] = ["front", "plan", "side", "iso"],
+    views: list[str] | None = None,
     title_block_w: float = 150.0,
     title_block_h: float = 30.0,
     margin: float = 10.0,
