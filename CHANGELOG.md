@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.3.36 — 2026-06-05
+
+### Added
+
+- **Transitive-safe import checking** — pure-Python packages installed on `sys.path`
+  whose full import closure lies within the security allowlist are now importable without
+  `--allow-imports`. The checker walks every `.py` source file in the transitive closure
+  and blocks anything that reaches `os`, `subprocess`, `socket`, etc. Closes #170.
+
+### Fixed
+
+- **Relative import bypass closed** — `from . import X` inside a transitively-checked
+  package was previously skipped, allowing a submodule that imports `os` to slip through.
+  Relative imports are now resolved to absolute names and checked recursively.
+- **Parent `__init__.py` now checked** — `from mypkg.utils import X` previously only
+  verified `utils.py`, not `mypkg/__init__.py`. Since `__init__.py` runs at import time
+  with real builtins, a malicious parent package could bypass the sandbox. Parent packages
+  are now checked before their submodules.
+
 ## v0.3.35 — 2026-06-04
 
 ### Added
