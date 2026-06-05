@@ -25,26 +25,27 @@ Note the bounding-box extents. These drive layout decisions below.
 Standard four-view layout. Page size is chosen in Step 2 based on part extents
 (A4 landscape 297 × 210 mm for most parts; A3 landscape 420 × 297 mm for large ones).
 
-| View | Camera position | Up vector | Role |
-|------|-----------------|-----------|------|
-| Main (front/side) | face the longest axis | +Z or +Y | primary dims |
-| Left/right end | +X or -X | +Z | cross-section / bore |
-| Plan (top) | +Z | +Y | footprint |
-| Isometric | (80, 80, 80) | (0, 0, 1) | pictorial, no dims |
+| View | Camera position (scaled space) | Up vector | Role |
+|------|-------------------------------|-----------|------|
+| Front (along -Y) | `(cxs, cys − DIST, czs)` | `(0, 0, 1)` | primary dims |
+| Side (along +X)  | `(cxs + DIST, cys, czs)` | `(0, 0, 1)` | depth/bore |
+| Plan (along +Z)  | `(cxs, cys, czs + DIST)` | `(0, 1, 0)` | footprint |
+| Isometric        | `(cxs+ID, cys+ID, czs+ID)`         | `(0, 0, 1)` | pictorial, no dims |
 
-The isometric position `(80, 80, 80)` gives the standard equal-axis view. Negate one
-axis (e.g. `(-80, 80, 80)`) to flip the pictorial orientation when a key feature is
-otherwise hidden.
+where `cxs = cx * SCALE`, `cys = cy * SCALE`, `czs = cz * SCALE`,
+`DIST = bbox_max * SCALE + 100` (orthographic cameras always outside the scaled bbox),
+and `ID = DIST / _m.sqrt(3)` (iso camera at the same distance along the equal-axis diagonal).
 
-Verify axis mapping **before** placing any dimensions:
+**Critical:** view direction = `look_at − camera`. For a pure orthographic projection the
+camera's off-axis coordinates must equal the scaled centroid — using `(0, -DIST, 0)` instead
+of `(cxs, cys - DIST, czs)` introduces a silent tilt whenever the centroid is off-axis.
 
-```
-mcp__build123d-mcp__view_axes(viewport_origin=[...], viewport_up=[...])
-```
+The iso camera uses equal `+ID` offsets on all three axes for a standard equal-axis view.
+Negate one axis (e.g. `(cxs-ID, cys+ID, czs+ID)`) to flip the pictorial orientation when
+a key feature is otherwise hidden.
 
-This returns `world_X → page_X (±1), world_Y → page_X (±1)` etc.
-Copy the result into the script as a comment — it is the source of truth for
-coordinate helpers.
+Axis mapping verification and sheet-position layout are both done in Step 2 once SCALE
+is known — see the `view_axes` and `suggest_view_layout` calls there.
 
 ---
 
@@ -55,7 +56,15 @@ within the usable page width (≈ page width − 20 mm margins). Use the boundin
 `x_size / y_size / z_size` values from `measure()` in Step 0.
 
 ```python
-bbox_max = max(x_size, y_size, z_size)   # longest world dimension in mm
+# Extract geometry from part — drives all layout decisions below.
+_bb   = part.bounding_box()
+x_size = _bb.max.X - _bb.min.X
+y_size = _bb.max.Y - _bb.min.Y
+z_size = _bb.max.Z - _bb.min.Z
+cx = (_bb.min.X + _bb.max.X) / 2
+cy = (_bb.min.Y + _bb.max.Y) / 2
+cz = (_bb.min.Z + _bb.max.Z) / 2
+bbox_max = max(x_size, y_size, z_size)
 
 # Rule of thumb: scaled bbox_max should be ≤ 60 % of usable page length
 if   bbox_max * 2.0 <= 170:
@@ -68,27 +77,104 @@ else:
     SCALE, PAGE_W, PAGE_H = 0.5, 420.0, 297.0   # A3 1:2  — very large parts
 ```
 
+Compute sheet positions **from the geometry** so the layout stays correct when the
+part changes — no magic numbers, no manual paste-in:
+
+```python
+import math as _m
+
+def _view_layout(part, scale, views=("front", "side", "plan", "iso"),
+                  margin=10, tb_h=30, gap=12):
+    """Derive view sheet positions from the part's bounding box."""
+    bb = part.bounding_box()
+    xs = bb.max.X - bb.min.X
+    ys = bb.max.Y - bb.min.Y
+    zs = bb.max.Z - bb.min.Z
+    def hw(v):
+        if v == "front": return xs*scale/2, zs*scale/2
+        if v == "plan":  return xs*scale/2, ys*scale/2
+        if v == "side":  return ys*scale/2, zs*scale/2
+        d = _m.sqrt(xs**2 + ys**2 + zs**2)*scale/2*0.75; return d, d
+    fhw, fhh = hw("front"); shw, _ = hw("side")
+    _,   phh = hw("plan");  ihw, ihh = hw("iso")
+    fx = margin + fhw
+    fy = margin + tb_h + gap + fhh
+    sx = fx + fhw + gap + shw
+    py = fy + fhh + gap + phh
+    # Iso falls back to front column/row when side or plan is absent
+    ix = (sx + shw + gap + ihw) if "side" in views else (fx + fhw + gap + ihw)
+    iy = py if "plan" in views else (fy + fhh + gap + ihh)
+    return dict(
+        front=(round(fx, 2), round(fy, 2)),
+        side= (round(sx, 2), round(fy, 2)),
+        plan= (round(fx, 2), round(py, 2)),
+        iso=  (round(ix, 2), round(iy, 2)),
+    )
+
+# Keep this list in sync with the VIEWS dict below; remove a name here when you
+# remove the corresponding entry from VIEWS so iso falls back to the correct column.
+_pos = _view_layout(part, SCALE, views=["front", "side", "plan", "iso"])
+FV_X, FV_Y   = _pos["front"]
+SV_X, SV_Y   = _pos["side"]
+PV_X, PV_Y   = _pos["plan"]
+ISO_X, ISO_Y = _pos["iso"]
+```
+
 Then project:
 
 ```python
 part_scaled = part.scale(SCALE)
 
-# look_at in scaled space for orthographic views; unscaled for iso
-look_at_s = (cx * SCALE, cy * SCALE, cz * SCALE)
+# Scaled centroid — used as look_at AND as the camera's off-axis coordinates.
+# Off-axis coords must match look_at so view direction stays pure-orthographic.
+cxs, cys, czs = cx * SCALE, cy * SCALE, cz * SCALE
+look_at_s = (cxs, cys, czs)
+DIST = bbox_max * SCALE + 100          # camera always outside the scaled bbox
+ID   = DIST / _m.sqrt(3)               # iso offset — same distance along equal-axis diagonal
 
-vis, hid = part_scaled.project_to_viewport(camera_pos, up, look_at_s)
-if not list(vis):
-    raise ValueError(f"project_to_viewport returned empty geometry for camera {camera_pos} — check camera position and look_at")
-iso_vis, iso_hid = part.project_to_viewport((80, 80, 80), (0, 0, 1), (cx, cy, cz))
+# Per-view camera positions: only the on-axis component differs.
+# Remove entries for views you don't need.
+VIEWS = {
+    "front": ((cxs, cys - DIST, czs), (0, 0, 1)),  # looking along +Y
+    "side":  ((cxs + DIST, cys, czs), (0, 0, 1)),  # looking along -X
+    "plan":  ((cxs, cys, czs + DIST), (0, 1, 0)),  # looking down -Z
+}
+VIEW_POS = {
+    "front": (FV_X, FV_Y),
+    "side":  (SV_X, SV_Y),
+    "plan":  (PV_X, PV_Y),
+}
+
+# Project and place each orthographic view; collect results by name.
+view_proj = {}  # {name: (placed_vis, placed_hid_or_None)}
+for view_name, (camera_pos, up) in VIEWS.items():
+    vis, hid = part_scaled.project_to_viewport(camera_pos, up, look_at_s)
+    if not list(vis):
+        raise ValueError(f"project_to_viewport returned empty geometry for {view_name} camera {camera_pos}")
+    vx, vy = VIEW_POS[view_name]
+    placed     = Compound(children=list(vis)).locate(Location((vx, vy, 0)))
+    placed_hid = Compound(children=list(hid)).locate(Location((vx, vy, 0))) if hid else None
+    view_proj[view_name] = (placed, placed_hid)
+
+# Iso uses the scaled part and a distance-safe offset on all three axes.
+iso_vis, iso_hid = part_scaled.project_to_viewport(
+    (cxs + ID, cys + ID, czs + ID), (0, 0, 1), look_at_s
+)
+iso   = Compound(children=list(iso_vis)).locate(Location((ISO_X, ISO_Y, 0)))
+iso_h = Compound(children=list(iso_hid)).locate(Location((ISO_X, ISO_Y, 0))) if iso_hid else None
 ```
 
-Place each projected compound at its sheet position:
+Now verify the axis mapping for each view. `cxs`/`cys`/`czs` are available here; substitute
+the actual numeric values for `look_at`:
 
-```python
-VIEW_X, VIEW_Y = 148.0, 115.0   # sheet centre for this view
-view = Compound(children=list(vis)).locate(Location((VIEW_X, VIEW_Y, 0)))
-view_h = Compound(children=list(hid)).locate(Location((VIEW_X, VIEW_Y, 0))) if hid else None
 ```
+mcp__build123d-mcp__view_axes(viewport_origin=[cxs, cys-DIST, czs], viewport_up=[0,0,1], look_at=[cxs,cys,czs])
+mcp__build123d-mcp__view_axes(viewport_origin=[cxs+DIST, cys, czs], viewport_up=[0,0,1], look_at=[cxs,cys,czs])
+mcp__build123d-mcp__view_axes(viewport_origin=[cxs, cys, czs+DIST], viewport_up=[0,1,0], look_at=[cxs,cys,czs])
+```
+
+Copy the results into the script as comments — they are the source of truth for the
+coordinate helpers in Step 3.
 
 ---
 
@@ -201,10 +287,14 @@ svg_exp.add_layer("hidden", line_color=hid_color,  line_weight=0.25,
                   line_type=LineType.HIDDEN)
 svg_exp.add_layer("dims",   line_color=dim_color,  fill_color=dim_color,
                   line_weight=0.05)
-for shape in [view1, view2, view3, iso]:
-    svg_exp.add_shape(shape, layer="part")
-for shape in [s for s in [v1_h, v2_h, v3_h, iso_h] if s]:
-    svg_exp.add_shape(shape, layer="hidden")
+for placed, _ in view_proj.values():
+    svg_exp.add_shape(placed, layer="part")
+svg_exp.add_shape(iso, layer="part")
+for _, placed_hid in view_proj.values():
+    if placed_hid:
+        svg_exp.add_shape(placed_hid, layer="hidden")
+if iso_h:
+    svg_exp.add_shape(iso_h, layer="hidden")
 for ann in all_anns:
     svg_exp.add_shape(ann, layer="dims")
 svg_exp.write(str(output_dir / "part_name.svg"))
@@ -219,10 +309,14 @@ dxf_exp = ExportDXF()
 dxf_exp.add_layer("part",   line_weight=0.5)
 dxf_exp.add_layer("hidden", line_weight=0.25)
 dxf_exp.add_layer("dims",   line_weight=0.05)
-for shape in [view1, view2, view3, iso]:
-    dxf_exp.add_shape(shape, layer="part")
-for shape in [s for s in [v1_h, v2_h, v3_h, iso_h] if s]:
-    dxf_exp.add_shape(shape, layer="hidden")
+for placed, _ in view_proj.values():
+    dxf_exp.add_shape(placed, layer="part")
+dxf_exp.add_shape(iso, layer="part")
+for _, placed_hid in view_proj.values():
+    if placed_hid:
+        dxf_exp.add_shape(placed_hid, layer="hidden")
+if iso_h:
+    dxf_exp.add_shape(iso_h, layer="hidden")
 for ann in all_anns:
     dxf_exp.add_shape(ann, layer="dims")
 dxf_exp.write(str(output_dir / "part_name.dxf"))
@@ -292,12 +386,12 @@ inspect the `viewBox` before placing the image.
 
 `view_axes` output drives all coordinate helpers. Common cases:
 
-| Camera | Up | world_X | world_Y | world_Z |
-|--------|----|---------|---------|---------|
-| -X (front) | +Z | — | page_X (-1) | page_Y (+1) |
+| Camera (VIEWS key) | Up | world_X | world_Y | world_Z |
+|--------------------|----|---------|---------|---------|
+| -Y (front) | +Z | page_X (+1) | — | page_Y (+1) |
+| +X (side)  | +Z | — | page_X (+1) | page_Y (+1) |
 | +Z (plan)  | +Y | page_X (+1) | page_Y (+1) | — |
-| -Y (end)   | +Z | page_X (+1) | — | page_Y (+1) |
-| +Y (side)  | +Z | page_X (-1) | — | page_Y (+1) |
+| -X (alt)   | +Z | — | page_X (-1) | page_Y (+1) |
 
 Signs flip when the camera is on the negative axis — always verify with
 `view_axes` rather than assuming.
