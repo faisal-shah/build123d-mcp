@@ -30,18 +30,19 @@ Standard four-view layout. Page size is chosen in Step 2 based on part extents
 | Front (along -Y) | `(cxs, cys − DIST, czs)` | `(0, 0, 1)` | primary dims |
 | Side (along +X)  | `(cxs + DIST, cys, czs)` | `(0, 0, 1)` | depth/bore |
 | Plan (along +Z)  | `(cxs, cys, czs + DIST)` | `(0, 1, 0)` | footprint |
-| Isometric        | `(cxs+80, cys+80, czs+80)`         | `(0, 0, 1)` | pictorial, no dims |
+| Isometric        | `(cxs+ID, cys+ID, czs+ID)`         | `(0, 0, 1)` | pictorial, no dims |
 
-where `cxs = cx * SCALE`, `cys = cy * SCALE`, `czs = cz * SCALE`, and `DIST = bbox_max * SCALE + 100`
-(ensures the camera is always outside the scaled bounding box regardless of part size).
+where `cxs = cx * SCALE`, `cys = cy * SCALE`, `czs = cz * SCALE`,
+`DIST = bbox_max * SCALE + 100` (orthographic cameras always outside the scaled bbox),
+and `ID = DIST / _m.sqrt(3)` (iso camera at the same distance along the equal-axis diagonal).
 
 **Critical:** view direction = `look_at − camera`. For a pure orthographic projection the
 camera's off-axis coordinates must equal the scaled centroid — using `(0, -DIST, 0)` instead
 of `(cxs, cys - DIST, czs)` introduces a silent tilt whenever the centroid is off-axis.
 
-The iso camera offset `(+80, +80, +80)` from the scaled centroid gives the standard
-equal-axis view. Negate one axis (e.g. `(cxs-80, cys+80, czs+80)`) to flip the pictorial
-orientation when a key feature is otherwise hidden.
+The iso camera uses equal `+ID` offsets on all three axes for a standard equal-axis view.
+Negate one axis (e.g. `(cxs-ID, cys+ID, czs+ID)`) to flip the pictorial orientation when
+a key feature is otherwise hidden.
 
 Axis mapping verification and sheet-position layout are both done in Step 2 once SCALE
 is known — see the `view_axes` and `suggest_view_layout` calls there.
@@ -74,7 +75,8 @@ part changes — no magic numbers, no manual paste-in:
 ```python
 import math as _m
 
-def _view_layout(part, scale, margin=10, tb_h=30, gap=12):
+def _view_layout(part, scale, views=("front", "side", "plan", "iso"),
+                  margin=10, tb_h=30, gap=12):
     """Derive view sheet positions from the part's bounding box."""
     bb = part.bounding_box()
     xs = bb.max.X - bb.min.X
@@ -86,33 +88,29 @@ def _view_layout(part, scale, margin=10, tb_h=30, gap=12):
         if v == "side":  return ys*scale/2, zs*scale/2
         d = _m.sqrt(xs**2 + ys**2 + zs**2)*scale/2*0.75; return d, d
     fhw, fhh = hw("front"); shw, _ = hw("side")
-    phw, phh = hw("plan");  ihw, _ = hw("iso")
+    _,   phh = hw("plan");  ihw, ihh = hw("iso")
     fx = margin + fhw
     fy = margin + tb_h + gap + fhh
     sx = fx + fhw + gap + shw
     py = fy + fhh + gap + phh
+    # Iso falls back to front column/row when side or plan is absent
+    ix = (sx + shw + gap + ihw) if "side" in views else (fx + fhw + gap + ihw)
+    iy = py if "plan" in views else (fy + fhh + gap + ihh)
     return dict(
         front=(round(fx, 2), round(fy, 2)),
         side= (round(sx, 2), round(fy, 2)),
         plan= (round(fx, 2), round(py, 2)),
-        iso=  (round(sx + shw + gap + ihw, 2), round(py, 2)),
+        iso=  (round(ix, 2), round(iy, 2)),
     )
 
-_pos = _view_layout(part, SCALE)
+# Keep this list in sync with the VIEWS dict below; remove a name here when you
+# remove the corresponding entry from VIEWS so iso falls back to the correct column.
+_pos = _view_layout(part, SCALE, views=["front", "side", "plan", "iso"])
 FV_X, FV_Y   = _pos["front"]
 SV_X, SV_Y   = _pos["side"]
 PV_X, PV_Y   = _pos["plan"]
 ISO_X, ISO_Y = _pos["iso"]
 ```
-
-Verify axis mapping (needed for coordinate helpers in Step 3) — run this after
-cxs/cys/czs are defined:
-
-```
-mcp__build123d-mcp__view_axes(viewport_origin=[...], viewport_up=[...], look_at=[cxs, cys, czs])
-```
-
-Copy the result into the script as a comment — it is the source of truth for coordinate helpers.
 
 Then project:
 
@@ -123,7 +121,8 @@ part_scaled = part.scale(SCALE)
 # Off-axis coords must match look_at so view direction stays pure-orthographic.
 cxs, cys, czs = cx * SCALE, cy * SCALE, cz * SCALE
 look_at_s = (cxs, cys, czs)
-DIST = bbox_max * SCALE + 100  # camera always outside the scaled bbox
+DIST = bbox_max * SCALE + 100          # camera always outside the scaled bbox
+ID   = DIST / _m.sqrt(3)               # iso offset — same distance along equal-axis diagonal
 
 # Per-view camera positions: only the on-axis component differs.
 # Remove entries for views you don't need.
@@ -149,13 +148,25 @@ for view_name, (camera_pos, up) in VIEWS.items():
     placed_hid = Compound(children=list(hid)).locate(Location((vx, vy, 0))) if hid else None
     view_proj[view_name] = (placed, placed_hid)
 
-# Iso also uses the scaled part so its sheet size matches the orthographic views.
+# Iso uses the scaled part and a distance-safe offset on all three axes.
 iso_vis, iso_hid = part_scaled.project_to_viewport(
-    (cxs + 80, cys + 80, czs + 80), (0, 0, 1), look_at_s
+    (cxs + ID, cys + ID, czs + ID), (0, 0, 1), look_at_s
 )
 iso   = Compound(children=list(iso_vis)).locate(Location((ISO_X, ISO_Y, 0)))
 iso_h = Compound(children=list(iso_hid)).locate(Location((ISO_X, ISO_Y, 0))) if iso_hid else None
 ```
+
+Now verify the axis mapping for each view. `cxs`/`cys`/`czs` are available here; substitute
+the actual numeric values for `look_at`:
+
+```
+mcp__build123d-mcp__view_axes(viewport_origin=[cxs, cys-DIST, czs], viewport_up=[0,0,1], look_at=[cxs,cys,czs])
+mcp__build123d-mcp__view_axes(viewport_origin=[cxs+DIST, cys, czs], viewport_up=[0,0,1], look_at=[cxs,cys,czs])
+mcp__build123d-mcp__view_axes(viewport_origin=[cxs, cys, czs+DIST], viewport_up=[0,1,0], look_at=[cxs,cys,czs])
+```
+
+Copy the results into the script as comments — they are the source of truth for the
+coordinate helpers in Step 3.
 
 ---
 
