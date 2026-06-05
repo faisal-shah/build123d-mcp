@@ -56,7 +56,15 @@ within the usable page width (≈ page width − 20 mm margins). Use the boundin
 `x_size / y_size / z_size` values from `measure()` in Step 0.
 
 ```python
-bbox_max = max(x_size, y_size, z_size)   # longest world dimension in mm
+# Extract geometry from part — drives all layout decisions below.
+_bb   = part.bounding_box()
+x_size = _bb.max.X - _bb.min.X
+y_size = _bb.max.Y - _bb.min.Y
+z_size = _bb.max.Z - _bb.min.Z
+cx = (_bb.min.X + _bb.max.X) / 2
+cy = (_bb.min.Y + _bb.max.Y) / 2
+cz = (_bb.min.Z + _bb.max.Z) / 2
+bbox_max = max(x_size, y_size, z_size)
 
 # Rule of thumb: scaled bbox_max should be ≤ 60 % of usable page length
 if   bbox_max * 2.0 <= 170:
