@@ -68,29 +68,45 @@ else:
     SCALE, PAGE_W, PAGE_H = 0.5, 420.0, 297.0   # A3 1:2  — very large parts
 ```
 
-Before projecting, get clash-free sheet positions and verify axis mapping. Both calls
-need SCALE and the scaled centroid, so run them after the scale selection block above.
-
-Call `suggest_view_layout` to get VIEW_X/VIEW_Y for every view:
-
-```
-mcp__build123d-mcp__suggest_view_layout(
-    object_name=..., page_w=PAGE_W, page_h=PAGE_H, scale=SCALE
-)
-```
-
-Read the returned JSON and paste the actual numeric values into the script — they depend
-on the part's bounding box, so never hardcode guesses:
+Compute sheet positions **from the geometry** so the layout stays correct when the
+part changes — no magic numbers, no manual paste-in:
 
 ```python
-# Positions from suggest_view_layout result — substitute real numbers here.
-FV_X, FV_Y   = ..., ...   # views["front"]["VIEW_X"], views["front"]["VIEW_Y"]
-SV_X, SV_Y   = ..., ...   # views["side"]
-PV_X, PV_Y   = ..., ...   # views["plan"]
-ISO_X, ISO_Y = ..., ...   # views["iso"]
+import math as _m
+
+def _view_layout(part, scale, margin=10, tb_h=30, gap=12):
+    """Derive view sheet positions from the part's bounding box."""
+    bb = part.bounding_box()
+    xs = bb.max.X - bb.min.X
+    ys = bb.max.Y - bb.min.Y
+    zs = bb.max.Z - bb.min.Z
+    def hw(v):
+        if v == "front": return xs*scale/2, zs*scale/2
+        if v == "plan":  return xs*scale/2, ys*scale/2
+        if v == "side":  return ys*scale/2, zs*scale/2
+        d = _m.sqrt(xs**2 + ys**2 + zs**2)*scale/2*0.75; return d, d
+    fhw, fhh = hw("front"); shw, _ = hw("side")
+    phw, phh = hw("plan");  ihw, _ = hw("iso")
+    fx = margin + fhw
+    fy = margin + tb_h + gap + fhh
+    sx = fx + fhw + gap + shw
+    py = fy + fhh + gap + phh
+    return dict(
+        front=(round(fx, 2), round(fy, 2)),
+        side= (round(sx, 2), round(fy, 2)),
+        plan= (round(fx, 2), round(py, 2)),
+        iso=  (round(sx + shw + gap + ihw, 2), round(py, 2)),
+    )
+
+_pos = _view_layout(part, SCALE)
+FV_X, FV_Y   = _pos["front"]
+SV_X, SV_Y   = _pos["side"]
+PV_X, PV_Y   = _pos["plan"]
+ISO_X, ISO_Y = _pos["iso"]
 ```
 
-Then verify axis mapping (needed for coordinate helpers in Step 3):
+Verify axis mapping (needed for coordinate helpers in Step 3) — run this after
+cxs/cys/czs are defined:
 
 ```
 mcp__build123d-mcp__view_axes(viewport_origin=[...], viewport_up=[...], look_at=[cxs, cys, czs])
