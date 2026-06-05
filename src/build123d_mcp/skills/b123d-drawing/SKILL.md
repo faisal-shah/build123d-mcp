@@ -30,7 +30,7 @@ Standard four-view layout. Page size is chosen in Step 2 based on part extents
 | Front (along -Y) | `(cxs, cys − DIST, czs)` | `(0, 0, 1)` | primary dims |
 | Side (along +X)  | `(cxs + DIST, cys, czs)` | `(0, 0, 1)` | depth/bore |
 | Plan (along +Z)  | `(cxs, cys, czs + DIST)` | `(0, 1, 0)` | footprint |
-| Isometric        | `(cx+80, cy+80, cz+80)` (unscaled) | `(0, 0, 1)` | pictorial, no dims |
+| Isometric        | `(cxs+80, cys+80, czs+80)`         | `(0, 0, 1)` | pictorial, no dims |
 
 where `cxs = cx * SCALE`, `cys = cy * SCALE`, `czs = cz * SCALE`, and `DIST = bbox_max * SCALE + 100`
 (ensures the camera is always outside the scaled bounding box regardless of part size).
@@ -39,22 +39,12 @@ where `cxs = cx * SCALE`, `cys = cy * SCALE`, `czs = cz * SCALE`, and `DIST = bb
 camera's off-axis coordinates must equal the scaled centroid — using `(0, -DIST, 0)` instead
 of `(cxs, cys - DIST, czs)` introduces a silent tilt whenever the centroid is off-axis.
 
-The iso camera offset `(+80, +80, +80)` from the centroid gives the standard equal-axis view.
-Negate one axis (e.g. `(cx-80, cy+80, cz+80)`) to flip the pictorial orientation when a key
-feature is otherwise hidden.
+The iso camera offset `(+80, +80, +80)` from the scaled centroid gives the standard
+equal-axis view. Negate one axis (e.g. `(cxs-80, cys+80, czs+80)`) to flip the pictorial
+orientation when a key feature is otherwise hidden.
 
-Verify axis mapping **before** placing any dimensions:
-
-```
-mcp__build123d-mcp__view_axes(viewport_origin=[...], viewport_up=[...], look_at=[cxs, cys, czs])
-```
-
-(Pass the centroid as `look_at` — `view_axes` uses it to compute helper offsets correctly.
-`cxs/cys/czs` are the scaled centroid values computed in Step 2.)
-
-This returns `world_X → page_X (±1), world_Y → page_X (±1)` etc.
-Copy the result into the script as a comment — it is the source of truth for
-coordinate helpers.
+Axis mapping verification and sheet-position layout are both done in Step 2 once SCALE
+is known — see the `view_axes` and `suggest_view_layout` calls there.
 
 ---
 
@@ -78,6 +68,36 @@ else:
     SCALE, PAGE_W, PAGE_H = 0.5, 420.0, 297.0   # A3 1:2  — very large parts
 ```
 
+Before projecting, get clash-free sheet positions and verify axis mapping. Both calls
+need SCALE and the scaled centroid, so run them after the scale selection block above.
+
+Call `suggest_view_layout` to get VIEW_X/VIEW_Y for every view:
+
+```
+mcp__build123d-mcp__suggest_view_layout(
+    object_name=..., page_w=PAGE_W, page_h=PAGE_H, scale=SCALE
+)
+```
+
+Read the returned JSON and paste the actual numeric values into the script — they depend
+on the part's bounding box, so never hardcode guesses:
+
+```python
+# Positions from suggest_view_layout result — substitute real numbers here.
+FV_X, FV_Y   = ..., ...   # views["front"]["VIEW_X"], views["front"]["VIEW_Y"]
+SV_X, SV_Y   = ..., ...   # views["side"]
+PV_X, PV_Y   = ..., ...   # views["plan"]
+ISO_X, ISO_Y = ..., ...   # views["iso"]
+```
+
+Then verify axis mapping (needed for coordinate helpers in Step 3):
+
+```
+mcp__build123d-mcp__view_axes(viewport_origin=[...], viewport_up=[...], look_at=[cxs, cys, czs])
+```
+
+Copy the result into the script as a comment — it is the source of truth for coordinate helpers.
+
 Then project:
 
 ```python
@@ -96,8 +116,6 @@ VIEWS = {
     "side":  ((cxs + DIST, cys, czs), (0, 0, 1)),  # looking along -X
     "plan":  ((cxs, cys, czs + DIST), (0, 1, 0)),  # looking down -Z
 }
-
-# Sheet positions per view — use suggest_view_layout or set manually.
 VIEW_POS = {
     "front": (FV_X, FV_Y),
     "side":  (SV_X, SV_Y),
@@ -115,9 +133,9 @@ for view_name, (camera_pos, up) in VIEWS.items():
     placed_hid = Compound(children=list(hid)).locate(Location((vx, vy, 0))) if hid else None
     view_proj[view_name] = (placed, placed_hid)
 
-# Iso uses unscaled part; camera offset from centroid preserves equal-axis direction.
-iso_vis, iso_hid = part.project_to_viewport(
-    (cx + 80, cy + 80, cz + 80), (0, 0, 1), (cx, cy, cz)
+# Iso also uses the scaled part so its sheet size matches the orthographic views.
+iso_vis, iso_hid = part_scaled.project_to_viewport(
+    (cxs + 80, cys + 80, czs + 80), (0, 0, 1), look_at_s
 )
 iso   = Compound(children=list(iso_vis)).locate(Location((ISO_X, ISO_Y, 0)))
 iso_h = Compound(children=list(iso_hid)).locate(Location((ISO_X, ISO_Y, 0))) if iso_hid else None
