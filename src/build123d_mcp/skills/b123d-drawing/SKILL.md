@@ -25,12 +25,18 @@ Note the bounding-box extents. These drive layout decisions below.
 Standard four-view layout. Page size is chosen in Step 2 based on part extents
 (A4 landscape 297 × 210 mm for most parts; A3 landscape 420 × 297 mm for large ones).
 
-| View | Camera position | Up vector | Role |
-|------|-----------------|-----------|------|
-| Main (front/side) | face the longest axis | +Z or +Y | primary dims |
-| Left/right end | +X or -X | +Z | cross-section / bore |
-| Plan (top) | +Z | +Y | footprint |
-| Isometric | (80, 80, 80) | (0, 0, 1) | pictorial, no dims |
+| View | Camera position (scaled space) | Up vector | Role |
+|------|-------------------------------|-----------|------|
+| Front (along -Y) | `(cx_s, cy_s − DIST, cz_s)` | `(0, 0, 1)` | primary dims |
+| Side (along +X)  | `(cx_s + DIST, cy_s, cz_s)` | `(0, 0, 1)` | depth/bore |
+| Plan (along +Z)  | `(cx_s, cy_s, cz_s + DIST)` | `(0, 1, 0)` | footprint |
+| Isometric        | `(80, 80, 80)` (unscaled)   | `(0, 0, 1)` | pictorial, no dims |
+
+where `cx_s = cx * SCALE`, `cy_s = cy * SCALE`, `cz_s = cz * SCALE`, and `DIST = 200`.
+
+**Critical:** view direction = `look_at − camera`. For a pure orthographic projection the
+camera's off-axis coordinates must equal the scaled centroid — using `(0, -200, 0)` instead
+of `(cx_s, cy_s - 200, cz_s)` introduces a silent tilt whenever the centroid is off-axis.
 
 The isometric position `(80, 80, 80)` gives the standard equal-axis view. Negate one
 axis (e.g. `(-80, 80, 80)`) to flip the pictorial orientation when a key feature is
@@ -73,14 +79,28 @@ Then project:
 ```python
 part_scaled = part.scale(SCALE)
 
-# look_at in scaled space for orthographic views; unscaled for iso
-look_at_s = (cx * SCALE, cy * SCALE, cz * SCALE)
+# Scaled centroid — used as look_at AND as the camera's off-axis coordinates.
+# Off-axis coords must match look_at so view direction stays pure-orthographic.
+cxs, cys, czs = cx * SCALE, cy * SCALE, cz * SCALE
+look_at_s = (cxs, cys, czs)
+DIST = 200  # large distance along the projection axis
 
-vis, hid = part_scaled.project_to_viewport(camera_pos, up, look_at_s)
-if not list(vis):
-    raise ValueError(f"project_to_viewport returned empty geometry for camera {camera_pos} — check camera position and look_at")
+# Per-view camera positions: only the on-axis component differs.
+VIEWS = {
+    "front": ((cxs, cys - DIST, czs), (0, 0, 1)),  # looking along +Y
+    "side":  ((cxs + DIST, cys, czs), (0, 0, 1)),  # looking along -X
+    "plan":  ((cxs, cys, czs + DIST), (0, 1, 0)),  # looking down -Z
+}
+
+for view_name, (camera_pos, up) in VIEWS.items():
+    vis, hid = part_scaled.project_to_viewport(camera_pos, up, look_at_s)
+    if not list(vis):
+        raise ValueError(f"project_to_viewport returned empty geometry for {view_name} camera {camera_pos}")
+
 iso_vis, iso_hid = part.project_to_viewport((80, 80, 80), (0, 0, 1), (cx, cy, cz))
 ```
+
+Adjust which views you generate to match Step 1 choices; remove entries from `VIEWS` you do not need.
 
 Place each projected compound at its sheet position:
 
