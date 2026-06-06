@@ -51,11 +51,12 @@ is known — see the `view_axes` and `suggest_view_layout` calls there.
 
 ## Step 2 — Choose page size and scale, then project
 
-Pick `SCALE` and page dimensions so the scaled longest dimension fits comfortably
-within the usable page width (≈ page width − 20 mm margins). Use the bounding-box
-`x_size / y_size / z_size` values from `measure()` in Step 0.
+Use `choose_scale()` from `build123d_drafting` — it applies the same thresholds as
+the automated pipeline and returns `TB_W` (title-block width) too:
 
 ```python
+from build123d_drafting import choose_scale
+
 # Extract geometry from part — drives all layout decisions below.
 _bb   = part.bounding_box()
 x_size = _bb.max.X - _bb.min.X
@@ -66,22 +67,14 @@ cy = (_bb.min.Y + _bb.max.Y) / 2
 cz = (_bb.min.Z + _bb.max.Z) / 2
 bbox_max = max(x_size, y_size, z_size)
 
-# Rule of thumb: scaled bbox_max should be ≤ 60 % of usable page length
-if   bbox_max * 2.0 <= 170:
-    SCALE, PAGE_W, PAGE_H = 2.0, 297.0, 210.0   # A4 2:1  — small parts
-elif bbox_max * 1.0 <= 170:
-    SCALE, PAGE_W, PAGE_H = 1.0, 297.0, 210.0   # A4 1:1
-elif bbox_max * 1.0 <= 260:
-    SCALE, PAGE_W, PAGE_H = 1.0, 420.0, 297.0   # A3 1:1  — larger parts
-else:
-    SCALE, PAGE_W, PAGE_H = 0.5, 420.0, 297.0   # A3 1:2  — very large parts
+SCALE, PAGE_W, PAGE_H, TB_W = choose_scale(x_size, y_size, z_size)
 ```
 
 Compute sheet positions using the `suggest_view_layout` MCP tool — it accounts for the
 title block footprint and warns when views collide with it or with each other:
 
 ```
-TB_W = 150.0  # title block width (mm) — must match the TitleBlock width= arg in Step 4
+# TB_W comes from choose_scale() — do NOT hardcode 150.0, it is 120.0 on A4.
 
 mcp__build123d-mcp__suggest_view_layout(
     object_name="part",        # name passed to show() in Step 0
@@ -164,16 +157,33 @@ coordinate helpers in Step 3.
 
 ## Step 3 — Coordinate helpers
 
-Write one helper per view so annotation coords are derived from world geometry,
-not hardcoded page numbers. Pattern (example for a view where world_Z → page_X):
+Write one pair of helpers per view so annotation coords are derived from world
+geometry, not hardcoded page numbers. Use the `view_axes` results from Step 2
+to get the signs right — never assume:
 
 ```python
-# Side view: world_Z → page_X (+1), world_Y → page_Y (+1), look_at Z=z_center
-def SX(z): return SV_X + z * SCALE - z_center * SCALE
-def SY(y): return SV_Y + y * SCALE
+# Front view (camera along −Y): world_X → page_X (+1), world_Z → page_Y (+1)
+def FX(x): return FV_X + (x - cx) * SCALE
+def FZ(z): return FV_Y + (z - cz) * SCALE
+
+# Side view (camera along +X): world_Y → page_X (+1), world_Z → page_Y (+1)
+def SX(y): return SV_X + (y - cy) * SCALE
+def SZ(z): return SV_Y + (z - cz) * SCALE
 ```
 
-Verify a known extent (e.g. top of part) maps to a sensible page Y before using.
+For ISO views (two world axes share one page axis), use `ViewCoordinates.pp()` instead:
+
+```python
+from build123d_drafting import ViewCoordinates, view_axes
+iso_vc = ViewCoordinates(
+    view_axes((cxs + ID, cys + ID, czs + ID), (0, 0, 1), look_at_s),
+    view_x=ISO_X, view_y=ISO_Y, cx=cx, cy=cy, cz=cz, scale=SCALE,
+)
+page_x, page_y = iso_vc.pp(world_x, world_y, world_z)
+```
+
+Verify a known extent (e.g. top of part) maps to a sensible page Y before placing
+any annotation.
 
 ---
 
@@ -181,11 +191,39 @@ Verify a known extent (e.g. top of part) maps to a sensible page Y before using.
 
 ```python
 from build123d_drafting import (
-    Dimension, Leader, TitleBlock,
+    Centerline, Dimension, Leader, TitleBlock,
     annotate, draft_preset, lint_drawing, place_dims, set_page,
 )
 
 draft = draft_preset(font_size=2.5, decimal_precision=1)
+```
+
+**Centrelines and bore leaders for rotationally symmetric parts** (Z-axis cylinders):
+
+```python
+# z_diams — list of Z-axis diameters, largest first (from analyse_cylinders or manual)
+if z_diams:
+    # Rotation-axis centreline in front and side views
+    annotate(Centerline(
+        (FX(cx), FZ(_bb.min.Z) - 5, 0),
+        (FX(cx), FZ(_bb.max.Z) + 5, 0),
+    ), "centerline_front")
+    annotate(Centerline(
+        (SX(cy), SZ(_bb.min.Z) - 5, 0),
+        (SX(cy), SZ(_bb.max.Z) + 5, 0),
+    ), "centerline_side")
+
+    # Inner bore leaders — arrowhead on bore edge, elbow to the left
+    left_edge = FX(_bb.min.X)
+    elbow_x   = left_edge - 10          # ~10 mm gap to left of part outline
+    for i, d in enumerate(z_diams[1:4]):
+        tip_z = FZ(cz) + (i - 1) * 10  # stagger vertically
+        annotate(Leader(
+            tip=(FX(cx - d / 2), tip_z, 0),
+            elbow=(elbow_x, tip_z, 0),
+            label=f"ø{d:.1f}" if d != int(d) else f"ø{int(d)}",
+            draft=draft,
+        ), f"bore_z{i}")
 ```
 
 **Stacked dimensions** (use `place_dims` — it handles offset stacking automatically):
@@ -327,6 +365,11 @@ if iso_h:
 for ann in all_anns:
     svg_exp.add_shape(ann, layer="dims")
 svg_exp.write(str(output_dir / "part_name.svg"))
+
+# Mandatory: fix the SVG viewBox so the full ISO page is preserved, not cropped
+# to the content bounding box (build123d ExportSVG default).
+from build123d_drafting import fix_svg_page_size
+fix_svg_page_size(str(output_dir / "part_name.svg"), PAGE_W, PAGE_H)
 ```
 
 Then export DXF (same layer structure; omit `line_color`, `fill_color`, and `line_type` args):
