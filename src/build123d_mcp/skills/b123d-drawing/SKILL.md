@@ -74,7 +74,7 @@ Compute sheet positions using the `suggest_view_layout` MCP tool — it accounts
 title block footprint and warns when views collide with it or with each other:
 
 ```
-TB_W = 150.0  # title block width (mm) — must match the TitleBlock width= arg in Step 4
+# TB_W comes from choose_scale() — do NOT hardcode 150.0, it is 120.0 on A4.
 
 mcp__build123d-mcp__suggest_view_layout(
     object_name="part",        # name passed to show() in Step 0
