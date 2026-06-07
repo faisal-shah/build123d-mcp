@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.3.37 — 2026-06-07
+
+### Changed
+
+- **`b123d-drawing` skill now leads with `make_drawing()` / `build_drawing()`.**
+  The default path is the automatic one-call pipeline; the `build_drawing()`
+  builder is documented for in-place customisation (add/remove dimensions, add
+  section views); the hand-built projection pipeline is retained as a clearly
+  labelled fallback for cases the builder cannot express. Requires
+  `build123d-drafting-helpers >= 0.4.1`.
+
+### Build
+
+- Bumped `build123d-drafting-helpers` floor to `>=0.4.1` (adds `make_drawing`
+  object input, `build_drawing` / `Drawing` builder, and the UTF-8 script fix).
+
 ## v0.3.36 — 2026-06-05
 
 ### Added
