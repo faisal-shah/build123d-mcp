@@ -30,6 +30,10 @@ mcp__build123d-mcp__measure  — confirm volume, bbox, face count
 mcp__build123d-mcp__render_view (save_to='/tmp/preview.png') — visual sanity check
 ```
 
+In the build step, register the part under a stable name with `show(part, "part")`
+— the manual pipeline's `suggest_view_layout(object_name="part")` and lint step
+reference it by that name.
+
 Note the bounding-box extents and whether the part is rotationally symmetric.
 This tells you whether the automatic drawing will capture the key features, and
 drives any manual layout decisions later.
@@ -153,7 +157,7 @@ Standard four-view layout. Page size is chosen in Manual 2 based on part extents
 
 where `cxs = cx * SCALE`, `cys = cy * SCALE`, `czs = cz * SCALE`,
 `DIST = bbox_max * SCALE + 100` (orthographic cameras always outside the scaled bbox),
-and `ID = DIST / _m.sqrt(3)` (iso camera at the same distance along the equal-axis diagonal).
+and `ID = DIST / (3 ** 0.5)` (iso camera at the same distance along the equal-axis diagonal).
 
 **Critical:** view direction = `look_at − camera`. For a pure orthographic projection the
 camera's off-axis coordinates must equal the scaled centroid — using `(0, -DIST, 0)` instead
@@ -226,7 +230,7 @@ part_scaled = part.scale(SCALE)
 cxs, cys, czs = cx * SCALE, cy * SCALE, cz * SCALE
 look_at_s = (cxs, cys, czs)
 DIST = bbox_max * SCALE + 100          # camera always outside the scaled bbox
-ID   = DIST / _m.sqrt(3)               # iso offset — same distance along equal-axis diagonal
+ID   = DIST / (3 ** 0.5)               # iso offset — same distance along equal-axis diagonal
 
 # Per-view camera positions: only the on-axis component differs.
 # Remove entries for views you don't need.
@@ -321,7 +325,9 @@ draft = draft_preset(font_size=2.5, decimal_precision=1)
 **Centrelines and bore leaders for rotationally symmetric parts** (Z-axis cylinders):
 
 ```python
-# z_diams — list of Z-axis diameters, largest first (from analyse_cylinders or manual)
+# Z-axis diameters, largest first (or build the list by hand):
+from build123d_drafting import analyse_cylinders, dedup_diams
+z_diams = dedup_diams(analyse_cylinders(part)[0])
 if z_diams:
     # Rotation-axis centreline in front and side views
     annotate(Centerline(
