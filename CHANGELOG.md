@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.3.38 — 2026-06-07
+
+### Changed
+
+- **`b123d-drawing` skill now defaults to saving a standalone regeneration
+  script.** After generating a drawing, the agent writes a clean, committable
+  `scripts/drawings/<part>.py` (via `generate_script()` for STEP inputs, or a
+  hand-written rebuild + `make_drawing` for in-session objects) so drawings live
+  in version control as reproducible code, not only as output artifacts — unless
+  the user opts out. Restores the `scripts/drawings/` convention dropped in the
+  v0.3.37 rewrite. Closes #175.
+
 ## v0.3.37 — 2026-06-07
 
 ### Changed

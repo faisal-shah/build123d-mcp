@@ -134,6 +134,63 @@ correctly. `view_annotation_overlap` warnings from the lint step usually show up
 here as cramped leaders — fix them with the builder (Step 2) if they matter.
 
 ---
+
+## Step 4 — Save a standalone regeneration script (default)
+
+Unless the user opts out, also write a clean, committable script to
+`scripts/drawings/<part>.py` that regenerates the drawing in a single run. The
+drawing should live in version control as reproducible code, not only as output
+artifacts. This must be a tidy reproducible script — **not** a dump of your
+exploratory `execute()` session.
+
+Pick the case that matches how you obtained the geometry:
+
+**A — Drawing from a STEP file** → use `generate_script()`. It writes an
+editable `build_drawing` script (including the customise-before-export seam)
+that reloads the STEP from disk:
+
+```python
+from build123d_drafting import generate_script
+
+generate_script(
+    "path/to/part.step",
+    out="scripts/drawings/bracket",   # → writes scripts/drawings/bracket.py
+    title="BRACKET", number="DWG-042",
+    tolerance="ISO 2768-f", drawn_by="Your Name",
+)
+```
+
+The generated script exports its SVG/DXF **next to itself** (the `out=_stem`
+line uses the script's own path), e.g. `scripts/drawings/bracket.svg`. If you
+want the outputs under `drawings/` instead, edit the final `dwg.export(...)`
+line in the generated script.
+
+**B — Drawing an in-session object** → `generate_script()` cannot embed a live
+object (it reloads geometry from disk and raises `TypeError` on a `Shape`).
+Write the script by hand so it is self-contained:
+
+1. Reconstruct the part — import the project's part-building module if one
+   exists (preferred), otherwise inline the minimal construction code.
+2. Call `make_drawing` / `build_drawing` with the same parameters you used.
+
+```python
+#!/usr/bin/env python3
+"""BRACKET — regenerates drawings/bracket.svg + .dxf in one run."""
+from build123d_drafting import make_drawing
+from myproject.bracket import build_bracket   # the part's source of truth
+
+part = build_bracket()
+make_drawing(part, out="drawings/bracket", title="BRACKET",
+             number="DWG-042", tolerance="ISO 2768-f", drawn_by="Your Name")
+```
+
+If the part was built ad-hoc in the session with no importable source, export it
+to STEP once and use case A instead — that keeps the script reproducible without
+pasting scratch geometry code.
+
+Tell the user where the script was saved.
+
+---
 ---
 
 # Manual pipeline (fallback)
@@ -549,6 +606,17 @@ pdf_y = PAGE_H - abs(vb_y)
 
 If the assert fires, the SVG was generated with a different coordinate convention;
 inspect the `viewBox` before placing the image.
+
+---
+
+## Manual 9 — Save a standalone regeneration script (default)
+
+The same default as Step 4 applies: unless the user opts out, save a clean,
+committable `scripts/drawings/<part>.py` that regenerates the drawing in one run.
+For the manual pipeline there is no `generate_script()` shortcut, so assemble the
+script by hand — reconstruct the part (import its source module, or load the STEP)
+followed by the projection / annotation / export steps above. Keep it tidy and
+reproducible, not a paste of the exploratory session.
 
 ---
 
