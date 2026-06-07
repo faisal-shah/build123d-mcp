@@ -1,14 +1,28 @@
 # Create Engineering Drawing from build123d Geometry
 
 Use this skill when asked to create or fix an engineering drawing for a
-build123d component. The drawings live in a project `scripts/drawings/`
-directory and export to a `drawings/` output directory.
+build123d component. Drawings export to a project `drawings/` output directory.
+
+**There are two paths — start with the automatic one.**
+
+1. **Automatic (`make_drawing`)** — one call turns a part (or STEP file) into a
+   four-view SVG + DXF with dimensions, centrelines, and an ISO 7200 title
+   block. Use this first for almost every part.
+2. **Builder (`build_drawing`)** — the same pipeline, but it hands back a live
+   `Drawing` you can edit (add/remove dimensions, add section/auxiliary views)
+   *before* export. Use this when the automatic drawing needs tweaks.
+3. **Manual pipeline** — build every view and annotation by hand. Only needed
+   for cases the builder cannot express (e.g. a true cut section). Documented at
+   the end as a fallback.
+
+Requires `build123d-drafting-helpers >= 0.4.1` (for `make_drawing` /
+`build_drawing`).
 
 ---
 
 ## Step 0 — Understand the part first
 
-Before writing any drawing code, use the MCP server to build and inspect the geometry:
+Before drawing anything, build and inspect the geometry:
 
 ```
 mcp__build123d-mcp__execute  — build the part in the session
@@ -16,13 +30,122 @@ mcp__build123d-mcp__measure  — confirm volume, bbox, face count
 mcp__build123d-mcp__render_view (save_to='/tmp/preview.png') — visual sanity check
 ```
 
-Note the bounding-box extents. These drive layout decisions below.
+In the build step, register the part under a stable name with `show(part, "part")`
+— the manual pipeline's `suggest_view_layout(object_name="part")` and lint step
+reference it by that name.
+
+Note the bounding-box extents and whether the part is rotationally symmetric.
+This tells you whether the automatic drawing will capture the key features, and
+drives any manual layout decisions later.
 
 ---
 
-## Step 1 — Choose views (third-angle projection)
+## Step 1 — Generate the drawing automatically (start here)
 
-Standard four-view layout. Page size is chosen in Step 2 based on part extents
+In the same `execute()` session where you built the part:
+
+```python
+from build123d_drafting import make_drawing
+
+svg, dxf = make_drawing(
+    part,                       # an in-session build123d object, OR a "path/to/part.step"
+    out="drawings/bracket",     # output stem; ".svg"/".dxf" are appended
+    title="BRACKET",            # ISO 7200 document title
+    number="DWG-042",           # ISO 7200 document identifier
+    tolerance="ISO 2768-f",     # general tolerance
+    drawn_by="Your Name",
+)
+```
+
+`make_drawing` chooses the scale + ISO page size, projects front/plan/side/iso
+views, adds overall and diameter dimensions, centrelines for rotational
+features, and a title block — then lints and writes both SVG and DXF. Pass an
+in-memory object directly (no STEP round-trip) or a STEP path.
+
+Then verify (Step 3). For most parts you are done here.
+
+What `make_drawing` does **not** do: spiral/freeform profile dimensions,
+cross-hole callouts that need a section, GD&T / datums, or non-standard layouts.
+If you need those, go to Step 2.
+
+---
+
+## Step 2 — Customise with the Drawing builder
+
+When the automatic drawing is close but needs edits, swap `make_drawing` for
+`build_drawing`. It runs the identical pipeline but returns a live `Drawing`
+**before** export, so your edits land in the output:
+
+```python
+from build123d_drafting import build_drawing, Leader
+
+dwg = build_drawing(part, out="drawings/bracket", title="BRACKET",
+                    number="DWG-042", tolerance="ISO 2768-f", drawn_by="Your Name")
+
+# Available on dwg:
+#   dwg.views        {"front","plan","side","iso"} → (visible, hidden) compounds
+#   dwg.annotations  mutable list of annotation objects
+#   dwg.draft / dwg.scale / dwg.page_w / dwg.page_h
+#   dwg.look_at / dwg.dist   (scaled-space building blocks for custom cameras)
+#   dwg.at(view, x, y, z)    → page point (px, py, 0) mapped from world coordinates
+
+# Add a dimension/leader the automatic pass missed:
+dwg.add(Leader(tip=dwg.at("front", 10, 0, 5), elbow=(8, 40, 0),
+               label="ø4 BORE", draft=dwg.draft), "ldr_bore")
+
+# Drop an automatic annotation by name. Auto names: dim_height, dim_od, dim_width,
+# centerline_front, centerline_side, ldr_z0…, dim_step_0…, title_block.
+dwg.remove("dim_od")
+
+# Re-lint after edits, then export:
+issues = dwg.lint()                       # list of LintIssue; [] when clean
+svg, dxf = dwg.export("drawings/bracket")
+```
+
+`make_drawing(...)` is exactly `build_drawing(...).export()`.
+
+**Add a section or auxiliary view** with `add_view()`. Give it a (pre-cut)
+shape, a camera in **scaled** space (compose it from `dwg.look_at` and
+`dwg.dist`, the same convention the standard views use), an up vector, and a
+page position; it returns that view's coordinate helper (`ViewCoordinates`):
+
+```python
+look = dwg.look_at
+bottom = (look[0], look[1], look[2] - dwg.dist)        # camera below the part
+vc = dwg.add_view("bottom", part, bottom, (0, 1, 0), (260.0, 60.0))
+px, py = vc.pp(world_x, world_y, world_z)              # annotate using the helper
+```
+
+Drop to the **manual pipeline** (below) only when even the builder cannot
+express what you need — most commonly a true cut/section where you must boolean
+the part against a cutting box yourself, or a fully bespoke multi-part sheet.
+
+---
+
+## Step 3 — Verify
+
+```
+mcp__build123d-mcp__render_drawing(svg_path='drawings/part_name.svg', save_to='/tmp/dwg.png')
+```
+
+Review the rendered PNG before moving on: check the views are upright and
+complete, dimensions are legible and not colliding, and the title block reads
+correctly. `view_annotation_overlap` warnings from the lint step usually show up
+here as cramped leaders — fix them with the builder (Step 2) if they matter.
+
+---
+---
+
+# Manual pipeline (fallback)
+
+Use this **only** when `make_drawing` / `build_drawing` cannot express the
+drawing (true cut sections, bespoke layouts). It builds every view and
+annotation by hand. Step 0 above still applies; the steps below replace
+Steps 1–3.
+
+## Manual 1 — Choose views (third-angle projection)
+
+Standard four-view layout. Page size is chosen in Manual 2 based on part extents
 (A4 landscape 297 × 210 mm for most parts; A3 landscape 420 × 297 mm for large ones).
 
 | View | Camera position (scaled space) | Up vector | Role |
@@ -34,7 +157,7 @@ Standard four-view layout. Page size is chosen in Step 2 based on part extents
 
 where `cxs = cx * SCALE`, `cys = cy * SCALE`, `czs = cz * SCALE`,
 `DIST = bbox_max * SCALE + 100` (orthographic cameras always outside the scaled bbox),
-and `ID = DIST / _m.sqrt(3)` (iso camera at the same distance along the equal-axis diagonal).
+and `ID = DIST / (3 ** 0.5)` (iso camera at the same distance along the equal-axis diagonal).
 
 **Critical:** view direction = `look_at − camera`. For a pure orthographic projection the
 camera's off-axis coordinates must equal the scaled centroid — using `(0, -DIST, 0)` instead
@@ -44,12 +167,12 @@ The iso camera uses equal `+ID` offsets on all three axes for a standard equal-a
 Negate one axis (e.g. `(cxs-ID, cys+ID, czs+ID)`) to flip the pictorial orientation when
 a key feature is otherwise hidden.
 
-Axis mapping verification and sheet-position layout are both done in Step 2 once SCALE
+Axis mapping verification and sheet-position layout are both done in Manual 2 once SCALE
 is known — see the `view_axes` and `suggest_view_layout` calls there.
 
 ---
 
-## Step 2 — Choose page size and scale, then project
+## Manual 2 — Choose page size and scale, then project
 
 Use `choose_scale()` from `build123d_drafting` — it applies the same thresholds as
 the automated pipeline and returns `TB_W` (title-block width) too:
@@ -90,7 +213,7 @@ continuing. Then extract the positions:
 
 ```python
 # Extract positions from suggest_view_layout result.
-# Re-run suggest_view_layout above if the part geometry changes before Step 2.
+# Re-run suggest_view_layout above if the part geometry changes before Manual 2.
 FV_X, FV_Y   = <result["views"]["front"]["VIEW_X"]>, <result["views"]["front"]["VIEW_Y"]>
 SV_X, SV_Y   = <result["views"]["side"]["VIEW_X"]>,  <result["views"]["side"]["VIEW_Y"]>
 PV_X, PV_Y   = <result["views"]["plan"]["VIEW_X"]>,  <result["views"]["plan"]["VIEW_Y"]>
@@ -107,7 +230,7 @@ part_scaled = part.scale(SCALE)
 cxs, cys, czs = cx * SCALE, cy * SCALE, cz * SCALE
 look_at_s = (cxs, cys, czs)
 DIST = bbox_max * SCALE + 100          # camera always outside the scaled bbox
-ID   = DIST / _m.sqrt(3)               # iso offset — same distance along equal-axis diagonal
+ID   = DIST / (3 ** 0.5)               # iso offset — same distance along equal-axis diagonal
 
 # Per-view camera positions: only the on-axis component differs.
 # Remove entries for views you don't need.
@@ -151,14 +274,14 @@ mcp__build123d-mcp__view_axes(viewport_origin=[cxs, cys, czs+DIST], viewport_up=
 ```
 
 Copy the results into the script as comments — they are the source of truth for the
-coordinate helpers in Step 3.
+coordinate helpers in Manual 3.
 
 ---
 
-## Step 3 — Coordinate helpers
+## Manual 3 — Coordinate helpers
 
 Write one pair of helpers per view so annotation coords are derived from world
-geometry, not hardcoded page numbers. Use the `view_axes` results from Step 2
+geometry, not hardcoded page numbers. Use the `view_axes` results from Manual 2
 to get the signs right — never assume:
 
 ```python
@@ -175,9 +298,10 @@ For ISO views (two world axes share one page axis), use `ViewCoordinates.pp()` i
 
 ```python
 from build123d_drafting import ViewCoordinates, view_axes
+# ViewCoordinates(axes, view_x, view_y, cx, cy, cz, scale)
 iso_vc = ViewCoordinates(
     view_axes((cxs + ID, cys + ID, czs + ID), (0, 0, 1), look_at_s),
-    view_x=ISO_X, view_y=ISO_Y, cx=cx, cy=cy, cz=cz, scale=SCALE,
+    ISO_X, ISO_Y, cx, cy, cz, SCALE,
 )
 page_x, page_y = iso_vc.pp(world_x, world_y, world_z)
 ```
@@ -187,7 +311,7 @@ any annotation.
 
 ---
 
-## Step 4 — Annotate with build123d_drafting
+## Manual 4 — Annotate with build123d_drafting
 
 ```python
 from build123d_drafting import (
@@ -201,7 +325,9 @@ draft = draft_preset(font_size=2.5, decimal_precision=1)
 **Centrelines and bore leaders for rotationally symmetric parts** (Z-axis cylinders):
 
 ```python
-# z_diams — list of Z-axis diameters, largest first (from analyse_cylinders or manual)
+# Z-axis diameters, largest first (or build the list by hand):
+from build123d_drafting import analyse_cylinders, dedup_diams
+z_diams = dedup_diams(analyse_cylinders(part)[0])
 if z_diams:
     # Rotation-axis centreline in front and side views
     annotate(Centerline(
@@ -249,19 +375,17 @@ ldr = Leader(
 annotate(ldr, "ldr_bearing_d")
 ```
 
-**Title block** (always include — use real values for the part being drawn):
+**Title block** (always include — use real values for the part being drawn).
+ISO 7200:2004 mandatory fields:
 
-ISO 7200:2004 mandatory fields and their parameter mapping:
-
-| ISO 7200 field | Parameter | Notes |
-|----------------|-----------|-------|
-| Field 1 — Legal owner | `legal_owner=` | Requires build123d-drafting-helpers ≥ 0.3.2. On older installs, prefix `part_name` instead: `"ACME Corp — BRACKET"` |
-| Field 2 — Document description | `part_name` | Always present |
-| Field 3 — Document identifier | `drawing_number` | Always present |
-| Field 4 — Revision indicator | `revision=` | Requires ≥ 0.3.2. On older installs, append to `drawing_number`: `"DWG-001 Rev A"` |
+| ISO 7200 field | Parameter |
+|----------------|-----------|
+| Field 1 — Legal owner | `legal_owner=` |
+| Field 2 — Document description | `part_name` (first positional) |
+| Field 3 — Document identifier | `drawing_number` (second positional) |
+| Field 4 — Revision indicator | `revision=` |
 
 ```python
-TB_W = 150.0
 tb = TitleBlock(
     "PART NAME",          # ISO 7200 field 2 — document title
     "DWG-NNN",            # ISO 7200 field 3 — document identifier
@@ -269,26 +393,11 @@ tb = TitleBlock(
     material="CZ121 BRASS",
     general_tolerance="ISO 2768-f",
     designed_by="Your Name",
-    revision="A",         # ISO 7200 field 4 — revision indicator (≥ 0.3.2)
-    legal_owner="COMPANY NAME",  # ISO 7200 field 1 — legal owner (≥ 0.3.2)
+    revision="A",                 # ISO 7200 field 4 — revision indicator
+    legal_owner="COMPANY NAME",   # ISO 7200 field 1 — legal owner
     width=TB_W,
     draft=draft,
 ).locate(Location((PAGE_W - TB_W - 10, 10, 0)))  # right-aligned: PAGE_W − block_width − margin
-annotate(tb, "title_block")
-```
-
-If `TitleBlock()` raises `TypeError: unexpected keyword argument 'revision'`, the installed
-version of build123d-drafting-helpers is older than 0.3.2. Only the first two positional
-args differ — pack owner and revision into them; everything else stays the same:
-```python
-# Older API workaround — only these two args change:
-tb = TitleBlock(
-    "COMPANY — PART NAME",  # legal_owner prefix + part_name (replaces legal_owner= param)
-    "DWG-NNN Rev A",        # drawing_number + revision indicator (replaces revision= param)
-    # all other args identical to the primary block above
-    drawing_scale=SCALE, material="CZ121 BRASS", general_tolerance="ISO 2768-f",
-    designed_by="<DESIGNER>", date="<YYYY-MM-DD>", width=TB_W, draft=draft,
-).locate(Location((PAGE_W - TB_W - 10, 10, 0)))
 annotate(tb, "title_block")
 ```
 
@@ -297,7 +406,7 @@ export will not see it.
 
 ---
 
-## Step 5 — Lint gate (run before export)
+## Manual 5 — Lint gate (run before export)
 
 Use the MCP tool — it reads annotations and view shapes directly from session state:
 
@@ -314,9 +423,8 @@ mcp__build123d-mcp__lint_drawing(
 )
 ```
 
-The `view_shape_names` list enables `view_annotation_overlap` and `view_overlap` checks
-(requires build123d-drafting-helpers ≥ 0.3.1). Omit it if you only need label/overlap
-checks and don't need view-boundary detection.
+The `view_shape_names` list enables `view_annotation_overlap` and `view_overlap` checks.
+Omit it if you only need label/overlap checks and don't need view-boundary detection.
 
 ```python
 # Alternatively, call the helper directly in execute() for more control:
@@ -341,7 +449,7 @@ Common lint failures and fixes:
 
 ---
 
-## Step 6 — Export SVG and DXF
+## Manual 6 — Export SVG and DXF
 
 ```python
 part_color = Color(0, 0, 0)
@@ -396,29 +504,29 @@ dxf_exp.write(str(output_dir / "part_name.dxf"))
 
 ---
 
-## Step 7 — Verify the SVG with the MCP server
+## Manual 7 — Verify the SVG with the MCP server
 
 ```
 mcp__build123d-mcp__render_drawing(svg_path='drawings/part_name.svg', save_to='/tmp/dwg.png')
 ```
 
-Send with `[SEND: /tmp/dwg.png]` for user review before moving on.
+Review the rendered PNG before moving on.
 
 ---
 
-## Step 8 — Combine into a PDF (optional)
+## Manual 8 — Combine into a PDF (optional)
 
 To assemble multiple drawing SVGs into a single multi-page PDF, rasterise each
 SVG at 200 DPI using `resvg-py` and combine pages with `fpdf2`.
 
-`PAGE_W` and `PAGE_H` are the values chosen in Step 2 (e.g. 297/210 for A4 or
+`PAGE_W` and `PAGE_H` are the values chosen in Manual 2 (e.g. 297/210 for A4 or
 420/297 for A3 landscape). Use them throughout so the PDF matches the drawing sheet.
 
 ```python
 import resvg_py
 from fpdf import FPDF
 
-# PAGE_W, PAGE_H set in Step 2
+# PAGE_W, PAGE_H set in Manual 2
 fmt = "A4" if PAGE_W < 400 else "A3"
 
 png_bytes = resvg_py.svg_to_bytes(svg_path=str(svg_path), dpi=200)
