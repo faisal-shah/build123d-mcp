@@ -62,3 +62,55 @@ def safe_input_path(filename: str) -> str:
     render_drawing, inspect_drawing, lint_drawing) and their sidecar reads.
     """
     return _safe_path(filename, "read")
+
+
+# Resource limits for model-supplied file inputs (issue #189). A model-callable
+# server should reject obviously excessive inputs *before* the expensive
+# parse/import/rasterise, rather than letting the work run until the exec
+# timeout kills the worker and destroys session state. Defaults are generous —
+# they reject only the absurd — and are env-overridable, matching the
+# BUILD123D_EXEC_TIMEOUT convention. Each limit is the single source of truth:
+# (default value, override env var). Read at call time so the override is
+# honoured per process and tests can set it with monkeypatch.setenv.
+_INPUT_SIZE_LIMITS = {
+    "svg": (20 * 1024 * 1024, "BUILD123D_MAX_SVG_BYTES"),  # 20 MB
+    "cad": (200 * 1024 * 1024, "BUILD123D_MAX_CAD_BYTES"),  # 200 MB
+}
+_RASTER_WIDTH_LIMIT = (10000, "BUILD123D_MAX_RASTER_WIDTH")  # px
+
+
+def check_input_size(path: str, kind: str) -> None:
+    """Reject an oversized input file before parsing/importing it.
+
+    `kind` is ``"svg"`` or ``"cad"``, selecting the byte limit. No-op when the
+    file is missing or unreadable — the caller's own existence check reports
+    that. Raises ``ValueError`` when the file exceeds the limit; callers let it
+    propagate, like the path-policy check above.
+    """
+    default_bytes, env_var = _INPUT_SIZE_LIMITS[kind]
+    max_bytes = int(os.environ.get(env_var, default_bytes))
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        return
+    if size > max_bytes:
+        raise ValueError(
+            f"Input file '{path}' is {size} bytes, exceeding the {max_bytes}-byte limit "
+            f"for {kind} inputs. Raise {env_var} to allow a larger file."
+        )
+
+
+def check_raster_width(width: int) -> None:
+    """Reject an extreme raster width before the output bitmap is allocated.
+
+    A bitmap is width × height × 4 bytes, so an unbounded width (e.g. 100000 px)
+    can demand tens of GB. Raises ``ValueError`` when exceeded; the caller lets
+    it propagate.
+    """
+    default_width, env_var = _RASTER_WIDTH_LIMIT
+    max_width = int(os.environ.get(env_var, default_width))
+    if width > max_width:
+        raise ValueError(
+            f"Requested raster width {width}px exceeds the {max_width}px limit. "
+            f"Raise {env_var} to allow a larger raster."
+        )

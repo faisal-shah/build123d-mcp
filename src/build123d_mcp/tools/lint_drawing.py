@@ -29,8 +29,10 @@ from build123d_drafting import (
 from build123d_drafting import (
     lint_drawing as _helper_lint,
 )
+from defusedxml.common import DefusedXmlException
+from defusedxml.ElementTree import parse as _safe_xml_parse
 
-from build123d_mcp.tools._paths import safe_input_path
+from build123d_mcp.tools._paths import check_input_size, safe_input_path
 
 # Checks that apply to a single annotation — run per-item so the violation can
 # carry the session object name (the helpers' issues only know the label text).
@@ -234,10 +236,12 @@ def _lint_svg(svg_path: str, drawing_scale: float = 1.0) -> list[dict]:
     # the .dims.json sidecar below derives from this resolved path so it stays
     # within the same validated directory.
     svg_path = safe_input_path(svg_path)
+    check_input_size(svg_path, "svg")
     violations: list[dict] = []
     try:
-        tree = ET.parse(svg_path)
-    except (FileNotFoundError, ET.ParseError) as e:
+        # Hardened parse: defusedxml rejects entity/DTD bombs (#189).
+        tree = _safe_xml_parse(svg_path)
+    except (FileNotFoundError, ET.ParseError, DefusedXmlException) as e:
         return [{"severity": "error", "check": "svg_parse", "object": svg_path, "message": str(e)}]
 
     def walk(elem, inherited_fill):
@@ -268,6 +272,9 @@ def _lint_svg(svg_path: str, drawing_scale: float = 1.0) -> list[dict]:
     walk(tree.getroot(), None)
 
     sidecar = os.path.splitext(svg_path)[0] + ".dims.json"
+    # Bound the sidecar's size too (#189) — it is a separate caller-influenced
+    # file, so the SVG limit above does not cover it.
+    check_input_size(sidecar, "svg")
     if os.path.isfile(sidecar):
         try:
             with open(sidecar) as f:

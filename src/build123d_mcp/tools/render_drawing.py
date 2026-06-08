@@ -11,7 +11,11 @@ resvg-py is already a runtime dep (used by render_view's 2D path).
 import os
 import re
 
-from build123d_mcp.tools._paths import safe_input_path
+from build123d_mcp.tools._paths import (
+    check_input_size,
+    check_raster_width,
+    safe_input_path,
+)
 
 # Build123d emits SVG with physical units (mm/cm/in) on width/height attributes.
 # resvg-py needs unitless pixel-equivalent values; this regex strips the unit.
@@ -31,8 +35,15 @@ def render_drawing(svg_path: str, width: int = 0, save_to: str = "") -> dict:
     Returns dict with at least {png: bytes} and {png_path: str} if save_to.
     On error returns {error: str} so the caller can surface it.
     """
+    # Reject extreme inputs early (#189): an absurd width allocates a huge
+    # bitmap, and an oversized SVG burns parse time — both raise ValueError and
+    # propagate, like the path-policy check below. Check the *effective* width
+    # (after the default substitution) since that is what the bitmap uses.
+    out_width = width if width > 0 else 1200
+    check_raster_width(out_width)
     # Reject reads outside the allowed roots before touching the filesystem.
     svg_path = safe_input_path(svg_path)
+    check_input_size(svg_path, "svg")
     if not os.path.isfile(svg_path):
         return {"error": f"SVG file not found: {svg_path}"}
 
@@ -48,7 +59,6 @@ def render_drawing(svg_path: str, width: int = 0, save_to: str = "") -> dict:
         return {"error": f"Could not read {svg_path}: {e}"}
 
     svg = _UNIT_RE.sub(r'\1="\2"', svg, count=2)
-    out_width = width if width > 0 else 1200
 
     try:
         png = bytes(
