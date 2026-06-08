@@ -74,17 +74,7 @@ jobs:
       - name: Sync server.json version with the release tag
         run: |
           tag=${{ github.event.release.tag_name }}
-          version=${tag#v}
-          python3 - <<EOF
-          import json
-          with open("server.json") as f:
-              d = json.load(f)
-          d["version"] = "$version"
-          for p in d.get("packages", []):
-              p["version"] = "$version"
-          with open("server.json", "w") as f:
-              json.dump(d, f, indent=2)
-          EOF
+          python3 scripts/sync_server_json.py "${tag#v}"
       - name: Install mcp-publisher
         run: |
           # Resolve the latest release tag via the API rather than the
@@ -121,11 +111,16 @@ jobs:
           base="${current%.dev*}"
           IFS='.' read -r major minor patch <<< "$base"
           uv version "${major}.${minor}.$((patch + 1)).dev0"
+      - name: Sync server.json to the new base version
+        run: |
+          new_base=$(grep '^version = ' pyproject.toml \
+            | sed 's/version = "\(.*\)"/\1/' | sed 's/\.dev[0-9]*$//')
+          python3 scripts/sync_server_json.py "$new_base"
       - name: Commit and push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           new_version=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
-          git add pyproject.toml uv.lock
+          git add pyproject.toml uv.lock server.json
           git commit -m "chore: bump version to ${new_version} after release"
           git push
