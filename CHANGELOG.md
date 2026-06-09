@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.42 — 2026-06-09
+
+### Documentation
+
+- **MCP client config examples fixed for recent uv.** `uv tool run --upgrade` is ignored by recent uv (≥ ~0.9) and warns on every launch, leaving clients silently pinned to uv's cached version. All five client examples now use the `@latest` specifier (`uv tool run --python 3.12 build123d-mcp@latest`), which re-resolves to the latest release per launch. If your MCP JSON still passes `--upgrade`, swap it for `@latest`. This release also refreshes the PyPI project page, which carried the old advice. (#228)
+
+---
+
 ## v0.3.41 — 2026-06-09
 
 ### Features
