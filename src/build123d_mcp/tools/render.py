@@ -238,6 +238,15 @@ def _vtk_render_tesselated(
 
     import vtk
 
+    # Silence VTK's warning stream before any VTK object is created. On macOS the
+    # Cocoa backend floods the caller's terminal with "Failed to get alpha color
+    # buffer size" warnings via its own output channel, escaping stderr
+    # redirection (#208). These warnings do not affect the rendered output.
+    # Guard to macOS only: on Linux, VTK uses its warning channel for OSMesa/EGL
+    # init failures; silencing it there would make blank-PNG returns undiagnosable.
+    if sys.platform == "darwin":
+        vtk.vtkObject.GlobalWarningDisplayOff()
+
     _ensure_display()
 
     renderer = vtk.vtkRenderer()
