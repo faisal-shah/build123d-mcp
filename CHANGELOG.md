@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.3.41 — 2026-06-09
+
+### Features
+
+- **New `analyze_printability` tool** — FDM printability analysis via augura (BREP-exact): overhangs, manifold/watertight, tip-over risk, brim/raft need, minimum vertical feature (→ max layer height), thin walls, and optional bed-fit against a declared build volume. Returns a plain-text summary plus a JSON report with per-finding detail. (#213)
+
+### Fixes
+
+- **Slow geometry queries no longer destroy the session.** `measure`, `clearance`, `cross_sections`, `shape_compare`, `align_check`, `analyze_printability`, `save_snapshot`, `diff_snapshot`, `resolve`, `suggest_view_layout`, and `load_part` now get a 60 s budget (previously 10 s — a timeout SIGKILLs the worker and loses all session state). (#214, #226)
+- **Worker restart errors now say that session state was lost** — every restart path (op timeout, dead-worker detection, mid-call crash) tells the client to re-run setup code instead of leaving it referencing dead object names. (#215, #226)
+- **macOS VTK render subprocess guard lowered to 100 s** so it fires before the parent's 120 s poll where it applies (partial fix; #216 remains open for the in-worker path). (#226)
+- **`session_state` filters the injected helpers (`annotate`, `named_face`, `set_page`, `register_centerline`) via the canonical `_INJECTED` set** instead of an accidental module-prefix match. (#219, #227)
+
+### Documentation
+
+- Security docs corrected: the `inspect` allowlist no longer claims it "cannot execute code" (introspection chains through `getmembers()` are an accepted known limit), and the README/CLAUDE.md now state explicitly that `--library` part files are trusted input. (#224, #225, #227)
+
+---
+
 ## v0.3.40 — 2026-06-09
 
 ### Features
