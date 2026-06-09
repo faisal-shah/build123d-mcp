@@ -255,3 +255,21 @@ def test_load_part_blocked_import_raises(tmp_path, session):
     idx = _LibraryIndex(str(tmp_path))
     with pytest.raises(ValueError, match="not allowed"):
         load_part(session, idx, "evil")
+
+
+def test_server_library_guard_uses_session_has_library(monkeypatch):
+    """The search_library/load_part wrappers gate on _session.has_library
+    (#183 — replaces the separate server._has_library global). An inverted
+    has_library would make these guard assertions fail, so a single
+    no-library session covers both the property and the wrapper guard."""
+    import build123d_mcp.server as srv
+    from build123d_mcp.worker import WorkerSession
+
+    no_lib = WorkerSession(exec_timeout=30)
+    monkeypatch.setattr(srv, "_session", no_lib, raising=False)
+    try:
+        assert no_lib.has_library is False
+        assert "No part library configured" in srv.search_library("x")
+        assert "No part library configured" in srv.load_part("widget")
+    finally:
+        no_lib._kill_worker()
