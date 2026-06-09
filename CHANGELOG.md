@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.3.40 — 2026-06-09
+
+### Features
+
+- **`execute()` now appends a session objects summary** to every successful result, e.g. `Session objects: part (Solid, 14 faces), sketch (Sketch)`. LLM agents no longer need a separate `session_state()` call to know what named shapes exist. (#206)
+
+### Fixes
+
+- **Suppress VTK Cocoa warning spam on macOS** — `GlobalWarningDisplayOff()` is now called before the first VTK object is created, silencing "Failed to get alpha color buffer size" noise that escaped stderr redirection. Scoped to macOS only; Linux retains full VTK diagnostic output. (#208)
+
+### Refactoring
+
+- **`server.py` split into focused modules** (#183):
+  - CLI/startup logic (`main()`, `install-skill` subcommand) extracted into `build123d_mcp/cli.py`
+  - Render result-marshalling (tempfile, `ImageContent`, `[SEND:]` markers) extracted into `tools/_marshal.py`
+  - `server.py` is now registration-only (~650 lines, down from ~890)
+
+---
+
 ## v0.3.39 — 2026-06-08
 
 ### Security
