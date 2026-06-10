@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.44 — 2026-06-10
+
+### Fixed
+
+- **Heavy imports no longer hit a fixed 60 s session-fatal timeout.** `import_cad_file` and `load_part` now run under `max(default, exec_timeout)`, so the default budget rises to 120 s and the existing `--exec-timeout` / `BUILD123D_EXEC_TIMEOUT` knob covers threaded STEP files and heavy library parts (threads, gears). Previously one slow import SIGKILLed the worker and destroyed every shape, named object, and snapshot. (#229, #231)
+- **`suggest_view_layout` works without a session object.** New optional `extents=[x, y, z]` (+ `centroid`) computes the layout from raw bounding-box sizes — the page math never needed live geometry, so a failed import no longer takes the layout tool down with it. The drawing skill's manual pipeline documents the fallback. (#229, #231)
+- **Drawing skill no longer collides with an existing `scripts/drawings.py`.** Step 4 now tells the agent to pick a non-colliding path such as `scripts/<part>_drawing.py` when a conflicting name exists, and the Cursor rules glob covers the alternative. (#230, #231)
+
+---
+
 ## v0.3.43 — 2026-06-10
 
 ### Dependencies
