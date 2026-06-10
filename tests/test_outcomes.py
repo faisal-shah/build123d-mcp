@@ -613,7 +613,6 @@ def test_mcp_lists_all_tools():
         "save_snapshot",
         "restore_snapshot",
         "diff_snapshot",
-        "interference",
         "search_library",
         "load_part",
         "workflow_hints",
