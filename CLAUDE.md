@@ -34,15 +34,29 @@ tools/interference.py — Boolean intersection check between two named shapes
 ## Adding a new tool
 
 1. Create `tools/<name>.py` with a function `def <name>(session, ...) -> str`.
-2. Import and register in `server.py`:
+   Optional parameters must carry their defaults on this function — the worker
+   wire omits arguments the caller didn't supply.
+2. Add a typed stub method on `WorkerSession` in `worker.py`:
    ```python
-   from tools.<name> import <name> as <name>_fn
-
+   @_op(_tool(f"{_T}.<name>:<name>"), _GEOMETRY_TIMEOUT)
+   def <name>(self, arg1: str, arg2: float = 0.0) -> str:
+       raise NotImplementedError
+   ```
+   The `@_op` decorator registers the op in `_OPS` and replaces the body with
+   bind-and-send — the signature is the single typed wire interface, so keep
+   its defaults equal to the tool function's. Ops that need more than
+   `fn(session, **args)` in the worker get a small `_op_<name>` handler
+   instead of `_tool(...)`.
+3. Register in `server.py`:
+   ```python
    @mcp.tool()
    def <name>(...) -> str:
        """Docstring shown to MCP clients."""
-       return <name>_fn(_session, ...)
+       return _session.<name>(...)
    ```
+4. Classify the op in `tests/test_worker_boundary_coverage.py` (add it to the
+   smoke inventory, `SESSION_STATEFUL_TOOLS`, or the reasoned allowlist) —
+   `test_every_dispatch_op_is_classified` fails until you do.
 
 ## Session model
 

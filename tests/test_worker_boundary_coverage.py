@@ -10,8 +10,9 @@ Helper-level tests against an in-process ``Session`` cannot catch that: they pas
 because the helper and the state share a process. This module pins the worker
 boundary instead:
 
-1. ``test_dispatch_ops_match_proxy_methods`` — every worker dispatch op has a
-   matching ``WorkerSession`` proxy method and vice-versa (1:1, AST-derived).
+1. ``test_every_op_reachable_via_proxy`` — every op in the ``worker._OPS`` table
+   resolves to a callable ``WorkerSession`` proxy (an ``@_op``-decorated stub or
+   an explicit method), so no table entry is unreachable from server.py.
 2. ``test_session_stateful_tool_sees_worker_state`` — each listed stateful tool,
    invoked through a real ``WorkerSession``, sees state that was created with
    ``execute()`` in the worker.
@@ -26,8 +27,6 @@ guarded by tests/test_worker_session_tools.py and tests/test_session_resource.py
 this module guards the worker-routed pattern that is now the established norm.
 """
 
-import ast
-import inspect
 import json
 
 import pytest
@@ -36,59 +35,60 @@ from build123d_mcp import worker
 from build123d_mcp.worker import WorkerSession
 
 # --------------------------------------------------------------------------- #
-# AST extraction of the dispatch / proxy op sets (single source of truth)      #
+# The op table (single source of truth)                                        #
 # --------------------------------------------------------------------------- #
 
 
 def _dispatch_ops() -> set[str]:
-    """Op strings compared in ``worker._dispatch`` (``if op == "...":``)."""
-    tree = ast.parse(inspect.getsource(worker._dispatch))
-    ops: set[str] = set()
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Compare)
-            and isinstance(node.left, ast.Name)
-            and node.left.id == "op"
-            and len(node.comparators) == 1
-            and isinstance(node.comparators[0], ast.Constant)
-            and isinstance(node.comparators[0].value, str)
-        ):
-            ops.add(node.comparators[0].value)
-    return ops
+    """Ops registered in the ``worker._OPS`` table (handler + timeout + params)."""
+    return set(worker._OPS)
 
 
-def _proxy_ops() -> set[str]:
-    """Op strings each ``WorkerSession`` method passes to ``self._call(op, ...)``."""
-    tree = ast.parse(inspect.getsource(WorkerSession))
-    ops: set[str] = set()
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "_call"
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "self"
-            and node.args
-            and isinstance(node.args[0], ast.Constant)
-            and isinstance(node.args[0].value, str)
-        ):
-            ops.add(node.args[0].value)
-    return ops
+def test_every_op_reachable_via_proxy():
+    """Every table op resolves to a callable on ``WorkerSession``.
 
-
-def test_dispatch_ops_match_proxy_methods():
-    """Every worker dispatch op is reachable through a proxy method and vice-versa.
-
-    Adding a ``_dispatch`` branch without a ``WorkerSession`` method (the tool is
-    unreachable from server.py), or a proxy method whose op string has no handler
-    (every call raises ``Unknown operation``), breaks this 1:1 mapping.
+    ``@_op``-decorated stubs and explicit methods (execute, reset) both count;
+    an op registered in ``_OPS`` without a corresponding method would make the
+    tool unreachable from server.py.
     """
-    dispatch = _dispatch_ops()
-    proxy = _proxy_ops()
-    assert dispatch == proxy, (
-        f"dispatch-only ops (no proxy method): {sorted(dispatch - proxy)}; "
-        f"proxy-only ops (no dispatch handler): {sorted(proxy - dispatch)}"
-    )
+    ws = WorkerSession.__new__(WorkerSession)  # attribute access only; no worker spawned
+    for op in sorted(_dispatch_ops()):
+        assert callable(getattr(ws, op)), f"op '{op}' has no callable proxy"
+
+
+def test_stub_defaults_match_tool_function_defaults():
+    """Stub-signature defaults must equal the tool function's own defaults.
+
+    Omitted optionals are not sent over the wire, so the tool function's
+    defaults are what actually applies; the stub defaults are the documented
+    interface. If they drift, behaviour silently depends on whether a caller
+    passes the argument explicitly.
+    """
+    import importlib
+    import inspect
+
+    checked = 0
+    for op, spec in worker._OPS.items():
+        path = getattr(spec.handler, "__tool_path__", None)
+        if path is None:
+            continue  # custom _op_<name> handler validates its own args
+        module_name, _, func_name = path.partition(":")
+        fn = getattr(importlib.import_module(module_name), func_name)
+        fn_params = inspect.signature(fn).parameters
+        # signature() follows __wrapped__ back to the @_op-decorated stub.
+        stub_params = inspect.signature(getattr(WorkerSession, op)).parameters
+        for pname, stub_p in stub_params.items():
+            if pname == "self":
+                continue
+            assert pname in fn_params, f"{op}: stub param '{pname}' not on the tool function"
+            if stub_p.default is inspect.Parameter.empty:
+                continue
+            assert stub_p.default == fn_params[pname].default, (
+                f"{op}.{pname}: stub default {stub_p.default!r} != "
+                f"tool-function default {fn_params[pname].default!r}"
+            )
+            checked += 1
+    assert checked > 20, "default-sync check matched suspiciously few parameters"
 
 
 # --------------------------------------------------------------------------- #

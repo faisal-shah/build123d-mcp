@@ -14,7 +14,13 @@ import inspect
 import pytest
 
 from build123d_mcp.security import ExecutionTimeout
-from build123d_mcp.worker import WorkerSession
+from build123d_mcp.worker import (
+    _EXPORT_TIMEOUT,
+    _GEOMETRY_TIMEOUT,
+    _RENDER_TIMEOUT,
+    _SHORT_TIMEOUT,
+    WorkerSession,
+)
 
 _STATE_LOSS_MARKER = "has been lost"
 
@@ -47,8 +53,8 @@ def test_geometry_heavy_ops_use_geometry_timeout():
     ws.resolve("a", ".faces()")
     ws.suggest_view_layout("a")
 
-    assert all(t == WorkerSession._GEOMETRY_TIMEOUT for _op, t in record), record
-    assert WorkerSession._GEOMETRY_TIMEOUT > WorkerSession._SHORT_TIMEOUT
+    assert all(t == _GEOMETRY_TIMEOUT for _op, t in record), record
+    assert _GEOMETRY_TIMEOUT > _SHORT_TIMEOUT
 
 
 def test_import_cad_file_honours_exec_timeout():
@@ -66,7 +72,7 @@ def test_import_cad_file_keeps_export_floor():
     record = []
     ws = _proxy_session(record, exec_timeout=10)
     ws.import_cad_file("part.step")
-    assert record == [("import_cad_file", WorkerSession._EXPORT_TIMEOUT)]
+    assert record == [("import_cad_file", _EXPORT_TIMEOUT)]
 
 
 def test_load_part_honours_exec_timeout():
@@ -81,7 +87,7 @@ def test_load_part_keeps_geometry_floor():
     record = []
     ws = _proxy_session(record, exec_timeout=10)
     ws.load_part("worm_gear")
-    assert record == [("load_part", WorkerSession._GEOMETRY_TIMEOUT)]
+    assert record == [("load_part", _GEOMETRY_TIMEOUT)]
 
 
 def test_bookkeeping_ops_keep_short_timeout():
@@ -95,7 +101,7 @@ def test_bookkeeping_ops_keep_short_timeout():
     ws.restore_snapshot("s")
     ws.search_library("q")
 
-    assert all(t == WorkerSession._SHORT_TIMEOUT for _op, t in record), record
+    assert all(t == _SHORT_TIMEOUT for _op, t in record), record
 
 
 class _StubConn:
@@ -165,4 +171,4 @@ def test_vtk_subprocess_timeout_below_render_poll():
     from build123d_mcp.tools.render import _vtk_render_subprocess
 
     inner = inspect.signature(_vtk_render_subprocess).parameters["timeout"].default
-    assert inner < WorkerSession._RENDER_TIMEOUT
+    assert inner < _RENDER_TIMEOUT
