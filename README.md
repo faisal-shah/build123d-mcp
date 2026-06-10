@@ -86,6 +86,8 @@ Build complexity falls into two tiers and the right approach differs between the
 
 > **Timeout note:** the default is 120 s. Raise it with `--exec-timeout N` or `BUILD123D_EXEC_TIMEOUT=N`. When a timeout fires, all session state is lost (worker is restarted) — you must re-run any setup code.
 
+> **Sandboxed-host note:** if every `execute()` fails with "Worker process failed to start", your MCP host is likely blocking subprocess creation (seen with sandboxed hosts on Windows). Relaunch with `--in-process` or `BUILD123D_IN_PROCESS=1` — a degraded mode that runs the CAD session inside the server process: no crash containment, no operation timeouts.
+
 > **Import note:** after `import_cad_file()` the shape is a named session object. Always render it by name (`objects="part"`) when other shapes from the same build are also in session — two co-located shapes cause Z-fighting (striped colour artifacts). STL imports produce a shell (volume = 0); `render_view` and `measure` work, but `interference()` and boolean operations require a solid.
 
 ## bd_warehouse fasteners
@@ -116,7 +118,7 @@ Unlike CAD MCP servers that simply `exec()` user code, build123d-mcp ships with 
 
 1. **AST inspection** — rejects imports of anything outside the allowlist (`build123d`, `bd_warehouse`, `math`, `numpy`, `inspect`, plus the rest of the safe stdlib subset and a curated set of geometric OCP submodules), blocks `eval`/`exec`/`compile`/`open`, and refuses dunder attribute access (the most common Python sandbox-escape route).
 2. **Restricted builtins** — the `__builtins__` exposed to user code has the dangerous functions removed and `__import__` rewrapped to enforce the same allowlist at runtime, so a payload that bypasses the AST check still hits the wall on import.
-3. **Execution timeout** — wall-clock limit (default 120 s, `--exec-timeout N` to override) enforced via SIGALRM, with the worker process restarted on breach so a hung script can't hold the session forever.
+3. **Execution timeout** — wall-clock limit (default 120 s, `--exec-timeout N` to override) enforced via SIGALRM, with the worker process restarted on breach so a hung script can't hold the session forever. In `--in-process` mode this layer is absent on Windows (no SIGALRM, no worker to restart) — a runaway script blocks the server.
 
 Filesystem I/O modules (`os`, `pathlib`, `shutil`), networking (`socket`, `urllib`, `requests`), shell access (`subprocess`), and the OCP file-I/O submodules (`STEPControl`, `IGESControl`, `OSD`, …) are **all blocked**. Path traversal is rejected for `export()` and `render_view(save_to=)`.
 

@@ -12,6 +12,11 @@ Timeout is managed at the WorkerSession level: if conn.poll() expires the
 parent kills the worker with SIGKILL and restarts it (fresh session).
 Within the worker, Session.execute() also applies a SIGALRM guard so that
 a hanging execute() call returns an error rather than blocking indefinitely.
+
+InProcessSession (end of this module) is the no-subprocess fallback for MCP
+hosts that block child-process creation (#143). It trades away the isolation
+above: the Session and OCC run inside the server process, with no crash
+containment and no operation timeouts.
 """
 
 import multiprocessing
@@ -20,16 +25,16 @@ from typing import Any
 _WORKER_READY_TIMEOUT = 60  # seconds to wait for worker import + ready signal
 
 
-def worker_main(
-    conn: Any,
-    library_path: str = "",
-    exec_timeout: int = 120,
-    allow_all_imports: bool = False,
-    extra_allowed_imports: tuple[str, ...] = (),
-) -> None:
-    """Entry point run in the worker subprocess.
+def _build_session(
+    library_path: str,
+    exec_timeout: int,
+    allow_all_imports: bool,
+    extra_allowed_imports: tuple[str, ...],
+) -> tuple[Any, Any]:
+    """Apply security overrides and build the Session (+ optional library index).
 
-    Loops receiving requests until the parent closes the connection.
+    Shared by worker_main (subprocess mode) and InProcessSession so a future
+    setup step cannot be added to one mode and forgotten in the other.
     """
     if allow_all_imports or extra_allowed_imports:
         import build123d_mcp.security as _sec
@@ -47,6 +52,23 @@ def worker_main(
         from build123d_mcp.tools.library import _LibraryIndex
 
         library_index = _LibraryIndex(library_path)
+    return session, library_index
+
+
+def worker_main(
+    conn: Any,
+    library_path: str = "",
+    exec_timeout: int = 120,
+    allow_all_imports: bool = False,
+    extra_allowed_imports: tuple[str, ...] = (),
+) -> None:
+    """Entry point run in the worker subprocess.
+
+    Loops receiving requests until the parent closes the connection.
+    """
+    session, library_index = _build_session(
+        library_path, exec_timeout, allow_all_imports, extra_allowed_imports
+    )
 
     conn.send({"ready": True})
 
@@ -323,9 +345,20 @@ class WorkerSession:
         self._conn = parent_conn
 
         if not self._conn.poll(_WORKER_READY_TIMEOUT):
+            exitcode = self._proc.exitcode  # read before kill: None means still running
             self._proc.kill()
             self._proc.join(5)
-            raise RuntimeError("Worker process failed to start within timeout.")
+            detail = (
+                f"the worker exited with code {exitcode} before signalling ready"
+                if exitcode is not None
+                else f"the worker did not signal ready within {_WORKER_READY_TIMEOUT}s"
+            )
+            raise RuntimeError(
+                f"Worker process failed to start: {detail}. If your MCP host blocks "
+                "subprocess creation (seen with sandboxed hosts on Windows, issue #143), "
+                "relaunch the server with --in-process or BUILD123D_IN_PROCESS=1 — a "
+                "degraded mode without crash containment or operation timeouts."
+            )
         self._conn.recv()  # consume the ready signal
 
     def _kill_worker(self) -> None:
@@ -635,3 +668,50 @@ class WorkerSession:
         # like a STEP import, so honour the exec-timeout knob here too (#229).
         timeout = max(self._GEOMETRY_TIMEOUT, self._exec_timeout)
         return self._call("load_part", {"name": name, "params": params}, timeout)
+
+
+class InProcessSession(WorkerSession):
+    """WorkerSession-compatible session that skips the worker subprocess.
+
+    Fallback for MCP hosts that block subprocess creation, where the spawn'd
+    worker never signals ready (#143: Codex desktop on Windows). The Session
+    and all OCC/VTK work live in the server process, so this mode is degraded
+    by design:
+
+    - no crash containment — an OCCT segfault kills the whole MCP server;
+    - no operation timeouts — a runaway execute() blocks the server (the
+      in-Session SIGALRM guard still applies on Unix main threads, but not
+      on Windows, which is exactly where this mode is needed);
+    - OCC/TBB threads share the process with the MCP event loop;
+    - platform render helpers still spawn subprocesses where required
+      (macOS VTK guard, Linux xvfb) and may also fail under a host that
+      blocks spawning — Windows renders in-process and is unaffected.
+
+    Enabled via --in-process / BUILD123D_IN_PROCESS=1.
+    """
+
+    def _start_worker(self) -> None:
+        self._session, self._library_index = _build_session(
+            self._library_path,
+            self._exec_timeout,
+            self._allow_all_imports,
+            self._extra_allowed_imports,
+        )
+
+    def _kill_worker(self) -> None:
+        pass
+
+    def reset(self) -> str:
+        # The base method short-circuits via self._proc.is_alive(); there is
+        # no process here, so always dispatch the real reset.
+        return self._call("reset", {}, self._SHORT_TIMEOUT)
+
+    def _call(self, op: str, args: dict, timeout: int) -> Any:
+        # Same error contract as the worker path: tool exceptions surface as
+        # RuntimeError("TypeName: message"), mirroring worker_main's error
+        # envelope. (Session.execute() handles ExecutionTimeout internally
+        # and returns an error string, so no special-casing is needed here.)
+        try:
+            return _dispatch(self._session, op, args, self._library_index)
+        except Exception as exc:
+            raise RuntimeError(f"{type(exc).__name__}: {exc}") from exc
