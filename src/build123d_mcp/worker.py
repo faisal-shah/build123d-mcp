@@ -154,6 +154,8 @@ def _tool(path: str) -> "Callable[[Any, dict, Any], Any]":
         fn = getattr(importlib.import_module(module_name), func_name)
         return fn(session, **args)
 
+    # Lets tests pin stub defaults to the tool function's (the operative ones).
+    handler.__tool_path__ = path  # type: ignore[attr-defined]
     return handler
 
 
@@ -546,7 +548,7 @@ class WorkerSession:
     @_op(_tool(f"{_T}.suggest_view_layout:suggest_view_layout"), _GEOMETRY_TIMEOUT)
     def suggest_view_layout(
         self,
-        object_name: str = "",
+        object_name: str,
         page_w: float = 297.0,
         page_h: float = 210.0,
         scale: float = 1.0,

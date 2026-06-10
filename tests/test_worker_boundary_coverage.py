@@ -56,6 +56,41 @@ def test_every_op_reachable_via_proxy():
         assert callable(getattr(ws, op)), f"op '{op}' has no callable proxy"
 
 
+def test_stub_defaults_match_tool_function_defaults():
+    """Stub-signature defaults must equal the tool function's own defaults.
+
+    Omitted optionals are not sent over the wire, so the tool function's
+    defaults are what actually applies; the stub defaults are the documented
+    interface. If they drift, behaviour silently depends on whether a caller
+    passes the argument explicitly.
+    """
+    import importlib
+    import inspect
+
+    checked = 0
+    for op, spec in worker._OPS.items():
+        path = getattr(spec.handler, "__tool_path__", None)
+        if path is None:
+            continue  # custom _op_<name> handler validates its own args
+        module_name, _, func_name = path.partition(":")
+        fn = getattr(importlib.import_module(module_name), func_name)
+        fn_params = inspect.signature(fn).parameters
+        # signature() follows __wrapped__ back to the @_op-decorated stub.
+        stub_params = inspect.signature(getattr(WorkerSession, op)).parameters
+        for pname, stub_p in stub_params.items():
+            if pname == "self":
+                continue
+            assert pname in fn_params, f"{op}: stub param '{pname}' not on the tool function"
+            if stub_p.default is inspect.Parameter.empty:
+                continue
+            assert stub_p.default == fn_params[pname].default, (
+                f"{op}.{pname}: stub default {stub_p.default!r} != "
+                f"tool-function default {fn_params[pname].default!r}"
+            )
+            checked += 1
+    assert checked > 20, "default-sync check matched suspiciously few parameters"
+
+
 # --------------------------------------------------------------------------- #
 # Smoke inventory: each stateful tool must SEE worker-owned state              #
 # --------------------------------------------------------------------------- #
