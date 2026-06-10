@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.3.45 — 2026-06-10
+
+### Features
+
+- **New `b123d-modeling` skill** — the full build-from-drawing/spec workflow (spec extraction, incremental build, numeric-then-visual verification, snapshots, heavy-build escape hatch, finish/export). Installable via `install_skill(skill="modeling")` for Claude Code, Cursor, Windsurf, or AGENTS.md, and readable as the `build123d://skill/modeling` resource. (#233)
+- **Server now ships MCP `instructions`** telling clients to use these tools for any task that builds, modifies, measures, or renders 3D geometry — fixes agents ignoring the server when tool schemas are deferred and only the name + instructions are visible. (#233)
+- **`measure()` reports mass and physical inertia.** Pass `density` (g/cm³) or a `material` preset (steel, stainless, aluminum/6061, brass, copper, titanium, abs, pla, petg, nylon) to get `mass_g` and the inertia tensor scaled to true mass moments; the new `inertia_units` field disambiguates g·mm² vs the volume-inertia default. (#237, #243)
+- **`find_edges()` session helper** — `find_edges(shape, geom="circle", radius=4.25, at_z=10.2)` selects fillet/chamfer edges on turned parts without hand-rolled filtering, returns a ShapeList that feeds straight into `fillet()`, and prints the match count, radii, and Z levels. (#239, #245)
+- **`export()` echoes a final sanity line** — volume/bbox/face count of the written solid (bbox/edge count for 2D), so the usually-last tool call confirms the right, non-degenerate object landed in the file. (#241, #244)
+- **Companion packages are discoverable**: `version()` lists `bd_warehouse` and `augura`, and `workflow_hints()` states bd_warehouse ships with the server — agents stop hand-rolling threads, fasteners, and gears. (#240, #244)
+
+### Fixed
+
+- **False "volume ≈ 0 — degenerate" warning when a sketch was left over.** An explicit `show()`/`annotate()` registration now wins `current_shape` over the post-exec variable scan (which iterated an unordered set and could land on the revolve's leftover sketch), and also over a stale `result` variable from an earlier call. Live 2D/1D geometry gets a "no solid volume" note instead of the failed-boolean warning, and the remaining scan is deterministic. (#236, #242)
+- **`measure()` face inventory cut to signal.** Identical faces collapse into one entry with a `count` (`4× Ø6.6 THRU` → one cylinder entry, count 4) and non-analytic sliver faces (thread fades) fold into a single summary line; analytic faces keep diameters/axes verbatim. An 82-face thread part drops from ~40 noise lines to a handful. (#238, #243)
+- **Modeling skill no longer uses maintainer-specific `[SEND:]`/`[ASK:]` markers** — instructions are spelled out in plain English so the skill works on any client; a regression test keeps shipped skills marker-free. (#246)
+
+### Documentation
+
+- Modeling skill Step 6 hands off to estampo when the project slices with it (`estampo.toml` present): update the `[[parts]]` entry, seed overrides from the printability report, run `estampo run`. (#234)
+
+### Dependencies
+
+- augura floor raised to 0.1.3. (#235, #247)
+
+---
+
 ## v0.3.44 — 2026-06-10
 
 ### Fixed
