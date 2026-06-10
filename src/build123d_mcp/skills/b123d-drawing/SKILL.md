@@ -143,6 +143,11 @@ drawing should live in version control as reproducible code, not only as output
 artifacts. This must be a tidy reproducible script — **not** a dump of your
 exploratory `execute()` session.
 
+If the project already has a conflicting name at that path (e.g. a
+`scripts/drawings.py` module), do **not** create a `scripts/drawings/`
+directory alongside it — pick a non-colliding path such as
+`scripts/<part>_drawing.py` and follow the project's existing script layout.
+
 Pick the case that matches how you obtained the geometry:
 
 **A — Drawing from a STEP file** → use `generate_script()`. It writes an
@@ -263,6 +268,10 @@ mcp__build123d-mcp__suggest_view_layout(
     title_block_h=24,          # ISO 7200 title block height with revision + legal_owner rows
 )
 ```
+
+If the part is not in the session (e.g. the import failed or timed out), pass
+`extents=[x_size, y_size, z_size]` (+ optional `centroid=[x, y, z]`) instead of
+`object_name` — the layout only needs the bounding box, not live geometry.
 
 Check `result["warnings"]` — if any view overlaps the title block or another view, the
 tool says so and may suggest a smaller scale or larger page. Address warnings before
