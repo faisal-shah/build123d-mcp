@@ -581,15 +581,7 @@ class Session:
         frames = tb_module.extract_tb(exc.__traceback__)
         mcp_frames = [f for f in frames if f.filename == "<mcp>"]
         lineno: int | None = mcp_frames[-1].lineno if mcp_frames else None
-        excerpt: str | None = None
-        if lineno is not None:
-            lines = code.splitlines()
-            start = max(0, lineno - 3)
-            end = min(len(lines), lineno + 2)
-            excerpt = "\n".join(
-                f"{i + 1:3d}{'→ ' if i + 1 == lineno else '  '}{lines[i]}"
-                for i in range(start, end)
-            )
+        excerpt = self._syntax_excerpt(code, lineno)
         return {"type": type(exc).__name__, "message": str(exc), "line": lineno, "excerpt": excerpt}
 
     def _update_current_shape(self, new_keys: set[str]) -> None:
