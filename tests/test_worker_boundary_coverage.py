@@ -11,8 +11,8 @@ because the helper and the state share a process. This module pins the worker
 boundary instead:
 
 1. ``test_every_op_reachable_via_proxy`` — every op in the ``worker._OPS`` table
-   resolves to a callable ``WorkerSession`` proxy (generated or explicit), and
-   unknown attributes still raise ``AttributeError`` (no silent op-name typos).
+   resolves to a callable ``WorkerSession`` proxy (an ``@_op``-decorated stub or
+   an explicit method), so no table entry is unreachable from server.py.
 2. ``test_session_stateful_tool_sees_worker_state`` — each listed stateful tool,
    invoked through a real ``WorkerSession``, sees state that was created with
    ``execute()`` in the worker.
@@ -47,16 +47,13 @@ def _dispatch_ops() -> set[str]:
 def test_every_op_reachable_via_proxy():
     """Every table op resolves to a callable on ``WorkerSession``.
 
-    Generated proxies (``__getattr__``) and explicit methods (execute, reset)
-    both count; an op that resolves to nothing would make the tool unreachable
-    from server.py. Unknown attributes must still raise ``AttributeError`` so
-    an op-name typo at a call site fails loudly rather than dispatching.
+    ``@_op``-decorated stubs and explicit methods (execute, reset) both count;
+    an op registered in ``_OPS`` without a corresponding method would make the
+    tool unreachable from server.py.
     """
     ws = WorkerSession.__new__(WorkerSession)  # attribute access only; no worker spawned
     for op in sorted(_dispatch_ops()):
         assert callable(getattr(ws, op)), f"op '{op}' has no callable proxy"
-    with pytest.raises(AttributeError):
-        ws.not_a_real_op
 
 
 # --------------------------------------------------------------------------- #

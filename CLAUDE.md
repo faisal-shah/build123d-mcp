@@ -36,12 +36,16 @@ tools/interference.py — Boolean intersection check between two named shapes
 1. Create `tools/<name>.py` with a function `def <name>(session, ...) -> str`.
    Optional parameters must carry their defaults on this function — the worker
    wire omits arguments the caller didn't supply.
-2. Add one entry to the `_OPS` table in `worker.py`:
+2. Add a typed stub method on `WorkerSession` in `worker.py`:
    ```python
-   "<name>": _OpSpec(_tool("build123d_mcp.tools.<name>:<name>"), _GEOMETRY_TIMEOUT, ("arg1", "arg2")),
+   @_op(_tool(f"{_T}.<name>:<name>"), _GEOMETRY_TIMEOUT)
+   def <name>(self, arg1: str, arg2: float = 0.0) -> str:
+       raise NotImplementedError
    ```
-   The `WorkerSession.<name>()` proxy method is generated from this entry; ops
-   that need more than `fn(session, **args)` get a small `_op_<name>` handler
+   The `@_op` decorator registers the op in `_OPS` and replaces the body with
+   bind-and-send — the signature is the single typed wire interface, so keep
+   its defaults equal to the tool function's. Ops that need more than
+   `fn(session, **args)` in the worker get a small `_op_<name>` handler
    instead of `_tool(...)`.
 3. Register in `server.py`:
    ```python

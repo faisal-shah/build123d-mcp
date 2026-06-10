@@ -19,9 +19,11 @@ above: the Session and OCC run inside the server process, with no crash
 containment and no operation timeouts.
 """
 
+import functools
+import inspect
 import multiprocessing
 from collections.abc import Callable
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, TypeVar, cast
 
 _WORKER_READY_TIMEOUT = 60  # seconds to wait for worker import + ready signal
 
@@ -129,9 +131,10 @@ class _OpSpec(NamedTuple):
     handler: (session, args, library_index) -> result, run inside the worker.
     timeout: parent-side wait budget in seconds, or a callable on the
         WorkerSession for budgets derived from the exec-timeout knob.
-    params: positional parameter order of the generated WorkerSession proxy
-        method — the wire-interface documentation. Optionals a caller omits
-        fall through to the tool function's own defaults.
+    params: positional parameter order of the WorkerSession proxy method,
+        derived from the stub signature by @_op — the wire-interface
+        documentation. Optionals a caller omits fall through to the tool
+        function's own defaults.
     """
 
     handler: "Callable[[Any, dict, Any], Any]"
@@ -227,128 +230,45 @@ def _op_render_drawing(session: Any, args: dict, library_index: Any) -> Any:
 
 _T = "build123d_mcp.tools"
 
+# Populated by the @_op decorator on WorkerSession's typed stub methods, plus
+# the two ops whose proxies need parent-side logic and are written by hand.
 _OPS: dict[str, _OpSpec] = {
     "execute": _OpSpec(_op_execute, _exec_budget, ("code",)),
-    "render_view": _OpSpec(
-        _tool(f"{_T}.render:render_view"),
-        _RENDER_TIMEOUT,
-        (
-            "direction",
-            "objects",
-            "quality",
-            "clip_plane",
-            "clip_at",
-            "azimuth",
-            "elevation",
-            "save_to",
-            "format",
-            "label_objects",
-            "highlights",
-            "colors",
-            "mode",
-        ),
-    ),
-    "export_file": _OpSpec(
-        _tool(f"{_T}.export:export_file"),
-        _EXPORT_TIMEOUT,
-        ("filename", "format", "object_name"),
-    ),
-    "interference": _OpSpec(
-        _tool(f"{_T}.interference:interference"),
-        _INTERFERENCE_TIMEOUT,
-        ("object_a", "object_b"),
-    ),
-    "measure": _OpSpec(
-        _tool(f"{_T}.measure:measure"),
-        _GEOMETRY_TIMEOUT,
-        ("object_name", "density", "material"),
-    ),
-    "clearance": _OpSpec(
-        _tool(f"{_T}.measure:clearance"), _GEOMETRY_TIMEOUT, ("object_a", "object_b")
-    ),
-    "cross_sections": _OpSpec(
-        _tool(f"{_T}.cross_sections:cross_sections"),
-        _GEOMETRY_TIMEOUT,
-        ("object_name", "axis", "num_slices"),
-    ),
-    "save_snapshot": _OpSpec(_op_save_snapshot, _GEOMETRY_TIMEOUT, ("name",)),
-    "restore_snapshot": _OpSpec(_op_restore_snapshot, _SHORT_TIMEOUT, ("name",)),
     "reset": _OpSpec(_op_reset, _SHORT_TIMEOUT, ()),
-    "search_library": _OpSpec(_op_search_library, _SHORT_TIMEOUT, ("query",)),
-    "load_part": _OpSpec(_op_load_part, _load_part_budget, ("name", "params")),
-    "diff_snapshot": _OpSpec(
-        _tool(f"{_T}.diff:diff_snapshot"),
-        _GEOMETRY_TIMEOUT,
-        ("snapshot_a", "snapshot_b", "format"),
-    ),
-    "session_state": _OpSpec(_tool(f"{_T}.session_state:session_state"), _SHORT_TIMEOUT, ()),
-    "objects_types": _OpSpec(_op_objects_types, _SHORT_TIMEOUT, ()),
-    "health_check": _OpSpec(_tool(f"{_T}.health_check:health_check"), _RENDER_TIMEOUT, ()),
-    "last_error": _OpSpec(_tool(f"{_T}.last_error:last_error"), _SHORT_TIMEOUT, ()),
-    "shape_compare": _OpSpec(
-        _tool(f"{_T}.shape_compare:shape_compare"), _GEOMETRY_TIMEOUT, ("object_a", "object_b")
-    ),
-    "import_cad_file": _OpSpec(
-        _tool(f"{_T}.import_step:import_cad_file"), _import_cad_budget, ("path", "name")
-    ),
-    "inspect_drawing": _OpSpec(
-        _tool(f"{_T}.inspect_drawing:inspect_drawing"), _SHORT_TIMEOUT, ("objects", "svg_path")
-    ),
-    "view_axes": _OpSpec(
-        _op_view_axes, _SHORT_TIMEOUT, ("viewport_origin", "viewport_up", "look_at")
-    ),
-    "lint_drawing": _OpSpec(
-        _tool(f"{_T}.lint_drawing:lint_drawing"),
-        _SHORT_TIMEOUT,
-        ("svg_path", "drawing_scale", "view_shape_names"),
-    ),
-    "render_drawing": _OpSpec(
-        _op_render_drawing, _RENDER_TIMEOUT, ("svg_path", "width", "save_to")
-    ),
-    "save_drawing_annotations": _OpSpec(
-        _tool(f"{_T}.save_drawing_annotations:save_drawing_annotations"),
-        _SHORT_TIMEOUT,
-        ("svg_path",),
-    ),
-    "align_check": _OpSpec(
-        _tool(f"{_T}.align_check:align_check"),
-        _GEOMETRY_TIMEOUT,
-        ("object_a", "object_b", "axis", "mode"),
-    ),
-    "resolve": _OpSpec(
-        _tool(f"{_T}.resolve:resolve"), _GEOMETRY_TIMEOUT, ("object_name", "selector", "label")
-    ),
-    "suggest_view_layout": _OpSpec(
-        _tool(f"{_T}.suggest_view_layout:suggest_view_layout"),
-        _GEOMETRY_TIMEOUT,
-        (
-            "object_name",
-            "page_w",
-            "page_h",
-            "scale",
-            "views",
-            "title_block_w",
-            "title_block_h",
-            "margin",
-            "extents",
-            "centroid",
-        ),
-    ),
-    "script": _OpSpec(_tool(f"{_T}.script:script"), _SHORT_TIMEOUT, ("save_to",)),
-    "analyze_printability": _OpSpec(
-        _tool(f"{_T}.analyze_printability:analyze_printability"),
-        _GEOMETRY_TIMEOUT,
-        (
-            "object_name",
-            "support_angle",
-            "nozzle",
-            "min_perimeters",
-            "build_volume",
-            "bed_tol",
-            "min_feature",
-        ),
-    ),
 }
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _op(
+    handler: "Callable[[Any, dict, Any], Any]",
+    timeout: "int | Callable[[WorkerSession], int]",
+) -> "Callable[[_F], _F]":
+    """Register a typed WorkerSession stub method as a worker-routed op.
+
+    Records the op in ``_OPS`` (handler + timeout + parameter order from the
+    signature) and replaces the body — which never runs — with bind-and-send:
+    supplied arguments are mapped through the real signature and shipped to
+    the worker; omitted optionals are not sent, falling through to the tool
+    function's own defaults. The ``Callable[[_F], _F]`` typing keeps the
+    declared signature visible to mypy and IDEs at every call site.
+    """
+
+    def deco(fn: _F) -> _F:
+        name = fn.__name__
+        sig = inspect.signature(fn)
+        _OPS[name] = _OpSpec(handler, timeout, tuple(sig.parameters)[1:])
+
+        @functools.wraps(fn)
+        def proxy(self: "WorkerSession", *args: Any, **kwargs: Any) -> Any:
+            bound = sig.bind(self, *args, **kwargs)
+            payload = {k: v for k, v in bound.arguments.items() if k != "self"}
+            t = timeout(self) if callable(timeout) else timeout
+            return self._call(name, payload, t)
+
+        return cast(_F, proxy)
+
+    return deco
 
 
 def _dispatch(session: Any, op: str, args: dict, library_index: Any) -> Any:
@@ -475,11 +395,11 @@ class WorkerSession:
 
     # --- Session-compatible interface ---
     #
-    # Proxy methods are generated from _OPS via __getattr__: positional args
-    # map through spec.params, the timeout comes from the table, and optionals
-    # the caller omits fall through to the tool-function defaults in the
-    # worker. Only ops needing parent-side behaviour beyond "send and wait"
-    # (execute, reset) are written out explicitly.
+    # Methods below are typed stubs registered with the @_op decorator: the
+    # signature is the single typed definition of the wire interface; the
+    # decorator records the op in _OPS and replaces the body (which never
+    # runs) with bind-and-send. Only ops needing parent-side behaviour beyond
+    # "send and wait" (execute, reset) are written out by hand.
 
     def execute(self, code: str) -> str:
         from build123d_mcp.security import ExecutionTimeout
@@ -495,29 +415,161 @@ class WorkerSession:
             return "Session reset."
         return self._call("reset", {}, _SHORT_TIMEOUT)
 
-    def __getattr__(self, name: str) -> Any:
-        # Fires only for attributes not found normally, so explicit methods
-        # and instance attributes take precedence. The Any return type also
-        # lets mypy accept the generated methods at call sites.
-        spec = _OPS.get(name)
-        if spec is None:
-            raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
+    @_op(_tool(f"{_T}.render:render_view"), _RENDER_TIMEOUT)
+    def render_view(
+        self,
+        direction: str = "iso",
+        objects: str = "",
+        quality: str = "standard",
+        clip_plane: str = "",
+        clip_at: float | None = None,
+        azimuth: float = 0.0,
+        elevation: float = 0.0,
+        save_to: str = "",
+        format: str = "png",
+        label_objects: bool = False,
+        highlights: list[dict] | None = None,
+        colors: dict[str, str] | None = None,
+        mode: str = "auto",
+    ) -> dict:
+        raise NotImplementedError
 
-        def proxy(*args: Any, **kwargs: Any) -> Any:
-            if len(args) > len(spec.params):
-                raise TypeError(f"{name}() takes at most {len(spec.params)} positional argument(s)")
-            payload = dict(zip(spec.params, args))
-            for key in kwargs:
-                if key in payload:
-                    raise TypeError(f"{name}() got multiple values for argument '{key}'")
-                if key not in spec.params:
-                    raise TypeError(f"{name}() got an unexpected keyword argument '{key}'")
-            payload.update(kwargs)
-            timeout = spec.timeout(self) if callable(spec.timeout) else spec.timeout
-            return self._call(name, payload, timeout)
+    @_op(_tool(f"{_T}.export:export_file"), _EXPORT_TIMEOUT)
+    def export_file(self, filename: str, format: str = "step", object_name: str = "") -> str:
+        raise NotImplementedError
 
-        proxy.__name__ = name
-        return proxy
+    @_op(_tool(f"{_T}.interference:interference"), _INTERFERENCE_TIMEOUT)
+    def interference(self, object_a: str, object_b: str) -> str:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.measure:measure"), _GEOMETRY_TIMEOUT)
+    def measure(self, object_name: str = "", density: float = 0.0, material: str = "") -> str:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.measure:clearance"), _GEOMETRY_TIMEOUT)
+    def clearance(self, object_a: str, object_b: str) -> str:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.cross_sections:cross_sections"), _GEOMETRY_TIMEOUT)
+    def cross_sections(self, object_name: str = "", axis: str = "Z", num_slices: int = 10) -> str:
+        raise NotImplementedError
+
+    @_op(_op_save_snapshot, _GEOMETRY_TIMEOUT)
+    def save_snapshot(self, name: str) -> str:
+        raise NotImplementedError
+
+    @_op(_op_restore_snapshot, _SHORT_TIMEOUT)
+    def restore_snapshot(self, name: str) -> str:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.diff:diff_snapshot"), _GEOMETRY_TIMEOUT)
+    def diff_snapshot(self, snapshot_a: str, snapshot_b: str = "", format: str = "text") -> str:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.session_state:session_state"), _SHORT_TIMEOUT)
+    def session_state(self) -> str:
+        raise NotImplementedError
+
+    @_op(_op_objects_types, _SHORT_TIMEOUT)
+    def objects_types(self) -> dict:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.analyze_printability:analyze_printability"), _GEOMETRY_TIMEOUT)
+    def analyze_printability(
+        self,
+        object_name: str = "",
+        support_angle: float = 45.0,
+        nozzle: float = 0.4,
+        min_perimeters: int = 2,
+        build_volume: str = "",
+        bed_tol: float = 0.001,
+        min_feature: float = 0.5,
+    ) -> str:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.health_check:health_check"), _RENDER_TIMEOUT)
+    def health_check(self) -> str:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.last_error:last_error"), _SHORT_TIMEOUT)
+    def last_error(self) -> str:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.shape_compare:shape_compare"), _GEOMETRY_TIMEOUT)
+    def shape_compare(self, object_a: str, object_b: str) -> str:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.import_step:import_cad_file"), _import_cad_budget)
+    def import_cad_file(self, path: str, name: str = "") -> str:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.inspect_drawing:inspect_drawing"), _SHORT_TIMEOUT)
+    def inspect_drawing(self, objects: str = "", svg_path: str = "") -> str:
+        raise NotImplementedError
+
+    @_op(_op_view_axes, _SHORT_TIMEOUT)
+    def view_axes(
+        self,
+        viewport_origin: tuple,
+        viewport_up: tuple = (0.0, 1.0, 0.0),
+        look_at: tuple = (0.0, 0.0, 0.0),
+    ) -> str:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.lint_drawing:lint_drawing"), _SHORT_TIMEOUT)
+    def lint_drawing(
+        self,
+        svg_path: str = "",
+        drawing_scale: float = 1.0,
+        view_shape_names: list[str] | None = None,
+    ) -> str:
+        raise NotImplementedError
+
+    @_op(_op_render_drawing, _RENDER_TIMEOUT)
+    def render_drawing(self, svg_path: str, width: int = 0, save_to: str = "") -> dict:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.save_drawing_annotations:save_drawing_annotations"), _SHORT_TIMEOUT)
+    def save_drawing_annotations(self, svg_path: str) -> str:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.align_check:align_check"), _GEOMETRY_TIMEOUT)
+    def align_check(
+        self, object_a: str, object_b: str, axis: str = "Z", mode: str = "flush"
+    ) -> str:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.resolve:resolve"), _GEOMETRY_TIMEOUT)
+    def resolve(self, object_name: str, selector: str, label: str = "") -> str:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.suggest_view_layout:suggest_view_layout"), _GEOMETRY_TIMEOUT)
+    def suggest_view_layout(
+        self,
+        object_name: str = "",
+        page_w: float = 297.0,
+        page_h: float = 210.0,
+        scale: float = 1.0,
+        views: list[str] | None = None,
+        title_block_w: float = 150.0,
+        title_block_h: float = 30.0,
+        margin: float = 10.0,
+        extents: list[float] | None = None,
+        centroid: list[float] | None = None,
+    ) -> str:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.script:script"), _SHORT_TIMEOUT)
+    def script(self, save_to: str = "") -> str:
+        raise NotImplementedError
+
+    @_op(_op_search_library, _SHORT_TIMEOUT)
+    def search_library(self, query: str = "") -> str:
+        raise NotImplementedError
+
+    @_op(_op_load_part, _load_part_budget)
+    def load_part(self, name: str, params: str = "") -> str:
+        raise NotImplementedError
 
 
 class InProcessSession(WorkerSession):
