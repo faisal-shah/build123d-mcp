@@ -533,6 +533,36 @@ def _viewport_origin_for(direction: str, shapes, azimuth: float, elevation: floa
     return origin, up, look_at
 
 
+def _clip_shapes(shapes, clip_plane, clip_at):
+    """Split each shape at the requested plane, keeping the +normal side.
+
+    Falls back to the unclipped shape if split is unsupported for the type.
+    """
+    if not clip_plane:
+        return list(shapes)
+
+    from build123d import Plane, Vector
+
+    clipped_shapes = []
+    for name, shape, color in shapes:
+        if clip_at is not None:
+            origin = {"x": (clip_at, 0, 0), "y": (0, clip_at, 0), "z": (0, 0, clip_at)}[clip_plane]
+        else:
+            c = shape.center()
+            origin = {"x": (c.X, 0, 0), "y": (0, c.Y, 0), "z": (0, 0, c.Z)}[clip_plane]
+        normal = {"x": (1, 0, 0), "y": (0, 1, 0), "z": (0, 0, 1)}[clip_plane]
+        plane = Plane(origin=Vector(*origin), z_dir=Vector(*normal))
+        try:
+            halves = shape.split(plane, keep=None)
+            # split with keep=None returns a tuple of (positive_side, negative_side);
+            # invert=False in PNG path means we keep the +normal side
+            kept = halves[0] if isinstance(halves, tuple) else halves
+        except Exception:
+            kept = shape  # fall back to unclipped if split is unsupported for the shape type
+        clipped_shapes.append((name, kept, color))
+    return clipped_shapes
+
+
 def _do_render_svg(shapes, direction, clip_plane, clip_at, azimuth, elevation) -> bytes:
     """Produce an SVG via build123d's HLR projection.
 
@@ -543,31 +573,9 @@ def _do_render_svg(shapes, direction, clip_plane, clip_at, azimuth, elevation) -
     """
     import tempfile
 
-    from build123d import ExportSVG, Plane, Vector
+    from build123d import ExportSVG
 
-    # Optionally clip each shape to the keep-side of the requested plane
-    clipped_shapes = []
-    if clip_plane:
-        for name, shape, color in shapes:
-            if clip_at is not None:
-                origin = {"x": (clip_at, 0, 0), "y": (0, clip_at, 0), "z": (0, 0, clip_at)}[
-                    clip_plane
-                ]
-            else:
-                c = shape.center()
-                origin = {"x": (c.X, 0, 0), "y": (0, c.Y, 0), "z": (0, 0, c.Z)}[clip_plane]
-            normal = {"x": (1, 0, 0), "y": (0, 1, 0), "z": (0, 0, 1)}[clip_plane]
-            plane = Plane(origin=Vector(*origin), z_dir=Vector(*normal))
-            try:
-                halves = shape.split(plane, keep=None)
-                # split with keep=None returns a tuple of (positive_side, negative_side);
-                # invert=False in PNG path means we keep the +normal side
-                kept = halves[0] if isinstance(halves, tuple) else halves
-            except Exception:
-                kept = shape  # fall back to unclipped if split is unsupported for the shape type
-            clipped_shapes.append((name, kept, color))
-    else:
-        clipped_shapes = list(shapes)
+    clipped_shapes = _clip_shapes(shapes, clip_plane, clip_at)
 
     origin, up, look_at = _viewport_origin_for(direction, clipped_shapes, azimuth, elevation)
 
@@ -616,28 +624,9 @@ def _do_render_dxf(shapes, direction, clip_plane, clip_at, azimuth, elevation) -
     """
     import tempfile
 
-    from build123d import ExportDXF, LineType, Plane, Vector
+    from build123d import ExportDXF, LineType
 
-    clipped_shapes = []
-    if clip_plane:
-        for name, shape, color in shapes:
-            if clip_at is not None:
-                origin = {"x": (clip_at, 0, 0), "y": (0, clip_at, 0), "z": (0, 0, clip_at)}[
-                    clip_plane
-                ]
-            else:
-                c = shape.center()
-                origin = {"x": (c.X, 0, 0), "y": (0, c.Y, 0), "z": (0, 0, c.Z)}[clip_plane]
-            normal = {"x": (1, 0, 0), "y": (0, 1, 0), "z": (0, 0, 1)}[clip_plane]
-            plane = Plane(origin=Vector(*origin), z_dir=Vector(*normal))
-            try:
-                halves = shape.split(plane, keep=None)
-                kept = halves[0] if isinstance(halves, tuple) else halves
-            except Exception:
-                kept = shape
-            clipped_shapes.append((name, kept, color))
-    else:
-        clipped_shapes = list(shapes)
+    clipped_shapes = _clip_shapes(shapes, clip_plane, clip_at)
 
     origin, up, look_at = _viewport_origin_for(direction, clipped_shapes, azimuth, elevation)
 
