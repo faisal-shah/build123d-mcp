@@ -10,8 +10,9 @@ Helper-level tests against an in-process ``Session`` cannot catch that: they pas
 because the helper and the state share a process. This module pins the worker
 boundary instead:
 
-1. ``test_dispatch_ops_match_proxy_methods`` — every worker dispatch op has a
-   matching ``WorkerSession`` proxy method and vice-versa (1:1, AST-derived).
+1. ``test_every_op_reachable_via_proxy`` — every op in the ``worker._OPS`` table
+   resolves to a callable ``WorkerSession`` proxy (generated or explicit), and
+   unknown attributes still raise ``AttributeError`` (no silent op-name typos).
 2. ``test_session_stateful_tool_sees_worker_state`` — each listed stateful tool,
    invoked through a real ``WorkerSession``, sees state that was created with
    ``execute()`` in the worker.
@@ -26,8 +27,6 @@ guarded by tests/test_worker_session_tools.py and tests/test_session_resource.py
 this module guards the worker-routed pattern that is now the established norm.
 """
 
-import ast
-import inspect
 import json
 
 import pytest
@@ -36,59 +35,28 @@ from build123d_mcp import worker
 from build123d_mcp.worker import WorkerSession
 
 # --------------------------------------------------------------------------- #
-# AST extraction of the dispatch / proxy op sets (single source of truth)      #
+# The op table (single source of truth)                                        #
 # --------------------------------------------------------------------------- #
 
 
 def _dispatch_ops() -> set[str]:
-    """Op strings compared in ``worker._dispatch`` (``if op == "...":``)."""
-    tree = ast.parse(inspect.getsource(worker._dispatch))
-    ops: set[str] = set()
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Compare)
-            and isinstance(node.left, ast.Name)
-            and node.left.id == "op"
-            and len(node.comparators) == 1
-            and isinstance(node.comparators[0], ast.Constant)
-            and isinstance(node.comparators[0].value, str)
-        ):
-            ops.add(node.comparators[0].value)
-    return ops
+    """Ops registered in the ``worker._OPS`` table (handler + timeout + params)."""
+    return set(worker._OPS)
 
 
-def _proxy_ops() -> set[str]:
-    """Op strings each ``WorkerSession`` method passes to ``self._call(op, ...)``."""
-    tree = ast.parse(inspect.getsource(WorkerSession))
-    ops: set[str] = set()
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "_call"
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "self"
-            and node.args
-            and isinstance(node.args[0], ast.Constant)
-            and isinstance(node.args[0].value, str)
-        ):
-            ops.add(node.args[0].value)
-    return ops
+def test_every_op_reachable_via_proxy():
+    """Every table op resolves to a callable on ``WorkerSession``.
 
-
-def test_dispatch_ops_match_proxy_methods():
-    """Every worker dispatch op is reachable through a proxy method and vice-versa.
-
-    Adding a ``_dispatch`` branch without a ``WorkerSession`` method (the tool is
-    unreachable from server.py), or a proxy method whose op string has no handler
-    (every call raises ``Unknown operation``), breaks this 1:1 mapping.
+    Generated proxies (``__getattr__``) and explicit methods (execute, reset)
+    both count; an op that resolves to nothing would make the tool unreachable
+    from server.py. Unknown attributes must still raise ``AttributeError`` so
+    an op-name typo at a call site fails loudly rather than dispatching.
     """
-    dispatch = _dispatch_ops()
-    proxy = _proxy_ops()
-    assert dispatch == proxy, (
-        f"dispatch-only ops (no proxy method): {sorted(dispatch - proxy)}; "
-        f"proxy-only ops (no dispatch handler): {sorted(proxy - dispatch)}"
-    )
+    ws = WorkerSession.__new__(WorkerSession)  # attribute access only; no worker spawned
+    for op in sorted(_dispatch_ops()):
+        assert callable(getattr(ws, op)), f"op '{op}' has no callable proxy"
+    with pytest.raises(AttributeError):
+        ws.not_a_real_op
 
 
 # --------------------------------------------------------------------------- #

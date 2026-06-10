@@ -20,7 +20,8 @@ containment and no operation timeouts.
 """
 
 import multiprocessing
-from typing import Any
+from collections.abc import Callable
+from typing import Any, NamedTuple
 
 _WORKER_READY_TIMEOUT = 60  # seconds to wait for worker import + ready signal
 
@@ -88,205 +89,273 @@ def worker_main(
             conn.send({"ok": False, "error": f"{type(exc).__name__}: {exc}"})
 
 
+# --------------------------------------------------------------------------- #
+# Op table — single source of truth for worker-routed operations (issue #220). #
+# --------------------------------------------------------------------------- #
+
+# Parent-side time budgets (seconds). Geometry-heavy queries (boolean ops,
+# per-face walks, BREP analysis, part construction) can legitimately exceed
+# 10s on complex parts, and a timeout here kills the worker and destroys all
+# session state — so the budget errs generous (issue #214). _SHORT_TIMEOUT is
+# only for ops that read session bookkeeping without touching geometry kernels.
+_RENDER_TIMEOUT = 120
+_EXPORT_TIMEOUT = 60
+_INTERFERENCE_TIMEOUT = 30
+_GEOMETRY_TIMEOUT = 60
+_SHORT_TIMEOUT = 10
+
+
+def _exec_budget(ws: "WorkerSession") -> int:
+    return ws._exec_timeout
+
+
+def _import_cad_budget(ws: "WorkerSession") -> int:
+    # STEP import of heavy geometry (threads, gears — lots of BSpline faces)
+    # can outlast _EXPORT_TIMEOUT, and a timeout kills the whole session.
+    # Honour the user's exec-timeout knob (--exec-timeout /
+    # BUILD123D_EXEC_TIMEOUT) when it is the larger budget (#229).
+    return max(_EXPORT_TIMEOUT, ws._exec_timeout)
+
+
+def _load_part_budget(ws: "WorkerSession") -> int:
+    # Library part scripts can build heavy geometry (threads, gears) just
+    # like a STEP import, so honour the exec-timeout knob here too (#229).
+    return max(_GEOMETRY_TIMEOUT, ws._exec_timeout)
+
+
+class _OpSpec(NamedTuple):
+    """One worker-routed operation.
+
+    handler: (session, args, library_index) -> result, run inside the worker.
+    timeout: parent-side wait budget in seconds, or a callable on the
+        WorkerSession for budgets derived from the exec-timeout knob.
+    params: positional parameter order of the generated WorkerSession proxy
+        method — the wire-interface documentation. Optionals a caller omits
+        fall through to the tool function's own defaults.
+    """
+
+    handler: "Callable[[Any, dict, Any], Any]"
+    timeout: "int | Callable[[WorkerSession], int]"
+    params: tuple[str, ...]
+
+
+def _tool(path: str) -> "Callable[[Any, dict, Any], Any]":
+    """Handler for the common case: lazily import ``module:function`` and call
+    ``fn(session, **args)``. Wire arg names must equal the function's parameter
+    names, with defaults living on the function itself."""
+    module_name, _, func_name = path.partition(":")
+
+    def handler(session: Any, args: dict, library_index: Any) -> Any:
+        import importlib
+
+        fn = getattr(importlib.import_module(module_name), func_name)
+        return fn(session, **args)
+
+    return handler
+
+
+# --- Ops with logic beyond fn(session, **args) ---
+
+
+def _op_execute(session: Any, args: dict, library_index: Any) -> Any:
+    return session.execute(args["code"])
+
+
+def _op_objects_types(session: Any, args: dict, library_index: Any) -> Any:
+    return session.objects_types()
+
+
+def _op_save_snapshot(session: Any, args: dict, library_index: Any) -> Any:
+    name = args["name"]
+    session.save_snapshot(name)
+    saved = (["current_shape"] if session.current_shape is not None else []) + list(
+        session.snapshots[name]["objects"].keys()
+    )
+    return f"Snapshot '{name}' saved. Geometry captured: {', '.join(saved) if saved else 'none'}."
+
+
+def _op_restore_snapshot(session: Any, args: dict, library_index: Any) -> Any:
+    name = args["name"]
+    try:
+        session.restore_snapshot(name)
+    except KeyError as e:
+        return f"Error: {e}"
+    restored = (["current_shape"] if session.current_shape is not None else []) + list(
+        session.objects.keys()
+    )
+    return f"Snapshot '{name}' restored. Active geometry: {', '.join(restored) if restored else 'none'}."
+
+
+def _op_reset(session: Any, args: dict, library_index: Any) -> Any:
+    session.reset()
+    return "Session reset."
+
+
+def _op_search_library(session: Any, args: dict, library_index: Any) -> Any:
+    if library_index is None:
+        return "No part library configured."
+    from build123d_mcp.tools.library import search_library
+
+    return search_library(library_index, args.get("query", ""))
+
+
+def _op_load_part(session: Any, args: dict, library_index: Any) -> Any:
+    if library_index is None:
+        return "No part library configured."
+    from build123d_mcp.tools.library import load_part
+
+    return load_part(session, library_index, args["name"], args.get("params", ""))
+
+
+def _op_view_axes(session: Any, args: dict, library_index: Any) -> Any:
+    # Pure helper: takes no session; sequence args normalised to tuples.
+    from build123d_mcp.tools.view_axes import view_axes
+
+    return view_axes(
+        tuple(args["viewport_origin"]),
+        tuple(args.get("viewport_up", (0.0, 1.0, 0.0))),
+        tuple(args.get("look_at", (0.0, 0.0, 0.0))),
+    )
+
+
+def _op_render_drawing(session: Any, args: dict, library_index: Any) -> Any:
+    # Pure helper: rasterises an SVG file from disk; takes no session.
+    from build123d_mcp.tools.render_drawing import render_drawing
+
+    return render_drawing(args["svg_path"], args.get("width", 0), args.get("save_to", ""))
+
+
+_T = "build123d_mcp.tools"
+
+_OPS: dict[str, _OpSpec] = {
+    "execute": _OpSpec(_op_execute, _exec_budget, ("code",)),
+    "render_view": _OpSpec(
+        _tool(f"{_T}.render:render_view"),
+        _RENDER_TIMEOUT,
+        (
+            "direction",
+            "objects",
+            "quality",
+            "clip_plane",
+            "clip_at",
+            "azimuth",
+            "elevation",
+            "save_to",
+            "format",
+            "label_objects",
+            "highlights",
+            "colors",
+            "mode",
+        ),
+    ),
+    "export_file": _OpSpec(
+        _tool(f"{_T}.export:export_file"),
+        _EXPORT_TIMEOUT,
+        ("filename", "format", "object_name"),
+    ),
+    "interference": _OpSpec(
+        _tool(f"{_T}.interference:interference"),
+        _INTERFERENCE_TIMEOUT,
+        ("object_a", "object_b"),
+    ),
+    "measure": _OpSpec(
+        _tool(f"{_T}.measure:measure"),
+        _GEOMETRY_TIMEOUT,
+        ("object_name", "density", "material"),
+    ),
+    "clearance": _OpSpec(
+        _tool(f"{_T}.measure:clearance"), _GEOMETRY_TIMEOUT, ("object_a", "object_b")
+    ),
+    "cross_sections": _OpSpec(
+        _tool(f"{_T}.cross_sections:cross_sections"),
+        _GEOMETRY_TIMEOUT,
+        ("object_name", "axis", "num_slices"),
+    ),
+    "save_snapshot": _OpSpec(_op_save_snapshot, _GEOMETRY_TIMEOUT, ("name",)),
+    "restore_snapshot": _OpSpec(_op_restore_snapshot, _SHORT_TIMEOUT, ("name",)),
+    "reset": _OpSpec(_op_reset, _SHORT_TIMEOUT, ()),
+    "search_library": _OpSpec(_op_search_library, _SHORT_TIMEOUT, ("query",)),
+    "load_part": _OpSpec(_op_load_part, _load_part_budget, ("name", "params")),
+    "diff_snapshot": _OpSpec(
+        _tool(f"{_T}.diff:diff_snapshot"),
+        _GEOMETRY_TIMEOUT,
+        ("snapshot_a", "snapshot_b", "format"),
+    ),
+    "session_state": _OpSpec(_tool(f"{_T}.session_state:session_state"), _SHORT_TIMEOUT, ()),
+    "objects_types": _OpSpec(_op_objects_types, _SHORT_TIMEOUT, ()),
+    "health_check": _OpSpec(_tool(f"{_T}.health_check:health_check"), _RENDER_TIMEOUT, ()),
+    "last_error": _OpSpec(_tool(f"{_T}.last_error:last_error"), _SHORT_TIMEOUT, ()),
+    "shape_compare": _OpSpec(
+        _tool(f"{_T}.shape_compare:shape_compare"), _GEOMETRY_TIMEOUT, ("object_a", "object_b")
+    ),
+    "import_cad_file": _OpSpec(
+        _tool(f"{_T}.import_step:import_cad_file"), _import_cad_budget, ("path", "name")
+    ),
+    "inspect_drawing": _OpSpec(
+        _tool(f"{_T}.inspect_drawing:inspect_drawing"), _SHORT_TIMEOUT, ("objects", "svg_path")
+    ),
+    "view_axes": _OpSpec(
+        _op_view_axes, _SHORT_TIMEOUT, ("viewport_origin", "viewport_up", "look_at")
+    ),
+    "lint_drawing": _OpSpec(
+        _tool(f"{_T}.lint_drawing:lint_drawing"),
+        _SHORT_TIMEOUT,
+        ("svg_path", "drawing_scale", "view_shape_names"),
+    ),
+    "render_drawing": _OpSpec(
+        _op_render_drawing, _RENDER_TIMEOUT, ("svg_path", "width", "save_to")
+    ),
+    "save_drawing_annotations": _OpSpec(
+        _tool(f"{_T}.save_drawing_annotations:save_drawing_annotations"),
+        _SHORT_TIMEOUT,
+        ("svg_path",),
+    ),
+    "align_check": _OpSpec(
+        _tool(f"{_T}.align_check:align_check"),
+        _GEOMETRY_TIMEOUT,
+        ("object_a", "object_b", "axis", "mode"),
+    ),
+    "resolve": _OpSpec(
+        _tool(f"{_T}.resolve:resolve"), _GEOMETRY_TIMEOUT, ("object_name", "selector", "label")
+    ),
+    "suggest_view_layout": _OpSpec(
+        _tool(f"{_T}.suggest_view_layout:suggest_view_layout"),
+        _GEOMETRY_TIMEOUT,
+        (
+            "object_name",
+            "page_w",
+            "page_h",
+            "scale",
+            "views",
+            "title_block_w",
+            "title_block_h",
+            "margin",
+            "extents",
+            "centroid",
+        ),
+    ),
+    "script": _OpSpec(_tool(f"{_T}.script:script"), _SHORT_TIMEOUT, ("save_to",)),
+    "analyze_printability": _OpSpec(
+        _tool(f"{_T}.analyze_printability:analyze_printability"),
+        _GEOMETRY_TIMEOUT,
+        (
+            "object_name",
+            "support_angle",
+            "nozzle",
+            "min_perimeters",
+            "build_volume",
+            "bed_tol",
+            "min_feature",
+        ),
+    ),
+}
+
+
 def _dispatch(session: Any, op: str, args: dict, library_index: Any) -> Any:
-    if op == "execute":
-        return session.execute(args["code"])
-
-    if op == "render_view":
-        from build123d_mcp.tools.render import render_view
-
-        return render_view(session, **args)
-
-    if op == "export_file":
-        from build123d_mcp.tools.export import export_file
-
-        return export_file(session, **args)
-
-    if op == "interference":
-        from build123d_mcp.tools.interference import interference
-
-        return interference(session, **args)
-
-    if op == "measure":
-        from build123d_mcp.tools.measure import measure
-
-        return measure(session, **args)
-
-    if op == "clearance":
-        from build123d_mcp.tools.measure import clearance
-
-        return clearance(session, **args)
-
-    if op == "cross_sections":
-        from build123d_mcp.tools.cross_sections import cross_sections
-
-        return cross_sections(session, **args)
-
-    if op == "save_snapshot":
-        name = args["name"]
-        session.save_snapshot(name)
-        saved = (["current_shape"] if session.current_shape is not None else []) + list(
-            session.snapshots[name]["objects"].keys()
-        )
-        return (
-            f"Snapshot '{name}' saved. Geometry captured: {', '.join(saved) if saved else 'none'}."
-        )
-
-    if op == "restore_snapshot":
-        name = args["name"]
-        try:
-            session.restore_snapshot(name)
-        except KeyError as e:
-            return f"Error: {e}"
-        restored = (["current_shape"] if session.current_shape is not None else []) + list(
-            session.objects.keys()
-        )
-        return f"Snapshot '{name}' restored. Active geometry: {', '.join(restored) if restored else 'none'}."
-
-    if op == "reset":
-        session.reset()
-        return "Session reset."
-
-    if op == "search_library":
-        if library_index is None:
-            return "No part library configured."
-        from build123d_mcp.tools.library import search_library
-
-        return search_library(library_index, args.get("query", ""))
-
-    if op == "load_part":
-        if library_index is None:
-            return "No part library configured."
-        from build123d_mcp.tools.library import load_part
-
-        return load_part(session, library_index, args["name"], args.get("params", ""))
-
-    if op == "diff_snapshot":
-        from build123d_mcp.tools.diff import diff_snapshot
-
-        return diff_snapshot(
-            session, args["snapshot_a"], args.get("snapshot_b", ""), args.get("format", "text")
-        )
-
-    if op == "session_state":
-        from build123d_mcp.tools.session_state import session_state
-
-        return session_state(session)
-
-    if op == "objects_types":
-        return session.objects_types()
-
-    if op == "health_check":
-        from build123d_mcp.tools.health_check import health_check
-
-        return health_check(session)
-
-    if op == "last_error":
-        from build123d_mcp.tools.last_error import last_error
-
-        return last_error(session)
-
-    if op == "shape_compare":
-        from build123d_mcp.tools.shape_compare import shape_compare
-
-        return shape_compare(session, args["object_a"], args["object_b"])
-
-    if op == "import_cad_file":
-        from build123d_mcp.tools.import_step import import_cad_file
-
-        return import_cad_file(session, args["path"], args.get("name", ""))
-
-    if op == "inspect_drawing":
-        from build123d_mcp.tools.inspect_drawing import inspect_drawing
-
-        return inspect_drawing(session, args.get("objects", ""), args.get("svg_path", ""))
-
-    if op == "view_axes":
-        from build123d_mcp.tools.view_axes import view_axes
-
-        return view_axes(
-            tuple(args["viewport_origin"]),
-            tuple(args.get("viewport_up", (0.0, 1.0, 0.0))),
-            tuple(args.get("look_at", (0.0, 0.0, 0.0))),
-        )
-
-    if op == "lint_drawing":
-        from build123d_mcp.tools.lint_drawing import lint_drawing
-
-        return lint_drawing(
-            session,
-            args.get("svg_path", ""),
-            args.get("drawing_scale", 1.0),
-            args.get("view_shape_names"),
-        )
-
-    if op == "render_drawing":
-        from build123d_mcp.tools.render_drawing import render_drawing
-
-        return render_drawing(
-            args["svg_path"],
-            args.get("width", 0),
-            args.get("save_to", ""),
-        )
-
-    if op == "save_drawing_annotations":
-        from build123d_mcp.tools.save_drawing_annotations import save_drawing_annotations
-
-        return save_drawing_annotations(session, args["svg_path"])
-
-    if op == "align_check":
-        from build123d_mcp.tools.align_check import align_check
-
-        return align_check(
-            session,
-            args["object_a"],
-            args["object_b"],
-            axis=args.get("axis", "Z"),
-            mode=args.get("mode", "flush"),
-        )
-
-    if op == "resolve":
-        from build123d_mcp.tools.resolve import resolve
-
-        return resolve(session, args["object_name"], args["selector"], label=args.get("label", ""))
-
-    if op == "suggest_view_layout":
-        from build123d_mcp.tools.suggest_view_layout import suggest_view_layout
-
-        return suggest_view_layout(
-            session,
-            args["object_name"],
-            args.get("page_w", 297.0),
-            args.get("page_h", 210.0),
-            args.get("scale", 1.0),
-            args.get("views"),
-            args.get("title_block_w", 150.0),
-            args.get("title_block_h", 30.0),
-            args.get("margin", 10.0),
-            args.get("extents"),
-            args.get("centroid"),
-        )
-
-    if op == "script":
-        from build123d_mcp.tools.script import script
-
-        return script(session, save_to=args.get("save_to", ""))
-
-    if op == "analyze_printability":
-        from build123d_mcp.tools.analyze_printability import analyze_printability
-
-        return analyze_printability(
-            session,
-            object_name=args.get("object_name", ""),
-            support_angle=args.get("support_angle", 45.0),
-            nozzle=args.get("nozzle", 0.4),
-            min_perimeters=args.get("min_perimeters", 2),
-            build_volume=args.get("build_volume", ""),
-            bed_tol=args.get("bed_tol", 0.001),
-            min_feature=args.get("min_feature", 0.5),
-        )
-
-    raise ValueError(f"Unknown operation: '{op}'")
+    spec = _OPS.get(op)
+    if spec is None:
+        raise ValueError(f"Unknown operation: '{op}'")
+    return spec.handler(session, args, library_index)
 
 
 class WorkerSession:
@@ -294,17 +363,6 @@ class WorkerSession:
 
     Exposes the same interface as Session so server.py can use either.
     """
-
-    _RENDER_TIMEOUT = 120
-    _EXPORT_TIMEOUT = 60
-    _INTERFERENCE_TIMEOUT = 30
-    # Geometry-heavy queries (boolean ops, per-face walks, BREP analysis, part
-    # construction) can legitimately exceed 10s on complex parts, and a timeout
-    # here kills the worker and destroys all session state — so the budget errs
-    # generous (issue #214). _SHORT_TIMEOUT is only for ops that read session
-    # bookkeeping without touching geometry kernels.
-    _GEOMETRY_TIMEOUT = 60
-    _SHORT_TIMEOUT = 10
 
     def __init__(
         self,
@@ -416,6 +474,12 @@ class WorkerSession:
         raise RuntimeError(response["error"])
 
     # --- Session-compatible interface ---
+    #
+    # Proxy methods are generated from _OPS via __getattr__: positional args
+    # map through spec.params, the timeout comes from the table, and optionals
+    # the caller omits fall through to the tool-function defaults in the
+    # worker. Only ops needing parent-side behaviour beyond "send and wait"
+    # (execute, reset) are written out explicitly.
 
     def execute(self, code: str) -> str:
         from build123d_mcp.security import ExecutionTimeout
@@ -425,249 +489,35 @@ class WorkerSession:
         except (RuntimeError, ExecutionTimeout) as e:
             return f"Error: {e}"
 
-    def render_view(
-        self,
-        direction: str = "iso",
-        objects: str = "",
-        quality: str = "standard",
-        clip_plane: str = "",
-        clip_at: float | None = None,
-        azimuth: float = 0.0,
-        elevation: float = 0.0,
-        save_to: str = "",
-        format: str = "png",
-        label_objects: bool = False,
-        highlights: list[dict] | None = None,
-        colors: dict[str, str] | None = None,
-        mode: str = "auto",
-    ) -> dict:
-        return self._call(
-            "render_view",
-            {
-                "direction": direction,
-                "objects": objects,
-                "quality": quality,
-                "clip_plane": clip_plane,
-                "clip_at": clip_at,
-                "azimuth": azimuth,
-                "elevation": elevation,
-                "save_to": save_to,
-                "format": format,
-                "label_objects": label_objects,
-                "highlights": highlights,
-                "colors": colors,
-                "mode": mode,
-            },
-            self._RENDER_TIMEOUT,
-        )
-
-    def export_file(self, filename: str, format: str = "step", object_name: str = "") -> str:
-        return self._call(
-            "export_file",
-            {"filename": filename, "format": format, "object_name": object_name},
-            self._EXPORT_TIMEOUT,
-        )
-
-    def interference(self, object_a: str, object_b: str) -> str:
-        return self._call(
-            "interference",
-            {"object_a": object_a, "object_b": object_b},
-            self._INTERFERENCE_TIMEOUT,
-        )
-
-    def measure(self, object_name: str = "", density: float = 0.0, material: str = "") -> str:
-        return self._call(
-            "measure",
-            {"object_name": object_name, "density": density, "material": material},
-            self._GEOMETRY_TIMEOUT,
-        )
-
-    def clearance(self, object_a: str, object_b: str) -> str:
-        return self._call(
-            "clearance", {"object_a": object_a, "object_b": object_b}, self._GEOMETRY_TIMEOUT
-        )
-
-    def cross_sections(self, object_name: str = "", axis: str = "Z", num_slices: int = 10) -> str:
-        return self._call(
-            "cross_sections",
-            {"object_name": object_name, "axis": axis, "num_slices": num_slices},
-            self._GEOMETRY_TIMEOUT,
-        )
-
-    def save_snapshot(self, name: str) -> str:
-        return self._call("save_snapshot", {"name": name}, self._GEOMETRY_TIMEOUT)
-
-    def restore_snapshot(self, name: str) -> str:
-        return self._call("restore_snapshot", {"name": name}, self._SHORT_TIMEOUT)
-
     def reset(self) -> str:
         if not self._proc.is_alive():
             self._start_worker()
             return "Session reset."
-        return self._call("reset", {}, self._SHORT_TIMEOUT)
+        return self._call("reset", {}, _SHORT_TIMEOUT)
 
-    def diff_snapshot(self, snapshot_a: str, snapshot_b: str = "", format: str = "text") -> str:
-        return self._call(
-            "diff_snapshot",
-            {"snapshot_a": snapshot_a, "snapshot_b": snapshot_b, "format": format},
-            self._GEOMETRY_TIMEOUT,
-        )
+    def __getattr__(self, name: str) -> Any:
+        # Fires only for attributes not found normally, so explicit methods
+        # and instance attributes take precedence. The Any return type also
+        # lets mypy accept the generated methods at call sites.
+        spec = _OPS.get(name)
+        if spec is None:
+            raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
 
-    def session_state(self) -> str:
-        return self._call("session_state", {}, self._SHORT_TIMEOUT)
+        def proxy(*args: Any, **kwargs: Any) -> Any:
+            if len(args) > len(spec.params):
+                raise TypeError(f"{name}() takes at most {len(spec.params)} positional argument(s)")
+            payload = dict(zip(spec.params, args))
+            for key in kwargs:
+                if key in payload:
+                    raise TypeError(f"{name}() got multiple values for argument '{key}'")
+                if key not in spec.params:
+                    raise TypeError(f"{name}() got an unexpected keyword argument '{key}'")
+            payload.update(kwargs)
+            timeout = spec.timeout(self) if callable(spec.timeout) else spec.timeout
+            return self._call(name, payload, timeout)
 
-    def objects_types(self) -> dict:
-        return self._call("objects_types", {}, self._SHORT_TIMEOUT)
-
-    def analyze_printability(
-        self,
-        object_name: str = "",
-        support_angle: float = 45.0,
-        nozzle: float = 0.4,
-        min_perimeters: int = 2,
-        build_volume: str = "",
-        bed_tol: float = 0.001,
-        min_feature: float = 0.5,
-    ) -> str:
-        return self._call(
-            "analyze_printability",
-            {
-                "object_name": object_name,
-                "support_angle": support_angle,
-                "nozzle": nozzle,
-                "min_perimeters": min_perimeters,
-                "build_volume": build_volume,
-                "bed_tol": bed_tol,
-                "min_feature": min_feature,
-            },
-            self._GEOMETRY_TIMEOUT,
-        )
-
-    def health_check(self) -> str:
-        return self._call("health_check", {}, self._RENDER_TIMEOUT)
-
-    def last_error(self) -> str:
-        return self._call("last_error", {}, self._SHORT_TIMEOUT)
-
-    def shape_compare(self, object_a: str, object_b: str) -> str:
-        return self._call(
-            "shape_compare", {"object_a": object_a, "object_b": object_b}, self._GEOMETRY_TIMEOUT
-        )
-
-    def import_cad_file(self, path: str, name: str = "") -> str:
-        # STEP import of heavy geometry (threads, gears — lots of BSpline faces)
-        # can outlast _EXPORT_TIMEOUT, and a timeout kills the whole session.
-        # Honour the user's exec-timeout knob (--exec-timeout /
-        # BUILD123D_EXEC_TIMEOUT) when it is the larger budget (#229).
-        timeout = max(self._EXPORT_TIMEOUT, self._exec_timeout)
-        return self._call("import_cad_file", {"path": path, "name": name}, timeout)
-
-    def inspect_drawing(self, objects: str = "", svg_path: str = "") -> str:
-        return self._call(
-            "inspect_drawing",
-            {"objects": objects, "svg_path": svg_path},
-            self._SHORT_TIMEOUT,
-        )
-
-    def view_axes(
-        self,
-        viewport_origin: tuple,
-        viewport_up: tuple = (0.0, 1.0, 0.0),
-        look_at: tuple = (0.0, 0.0, 0.0),
-    ) -> str:
-        return self._call(
-            "view_axes",
-            {"viewport_origin": viewport_origin, "viewport_up": viewport_up, "look_at": look_at},
-            self._SHORT_TIMEOUT,
-        )
-
-    def lint_drawing(
-        self,
-        svg_path: str = "",
-        drawing_scale: float = 1.0,
-        view_shape_names: list[str] | None = None,
-    ) -> str:
-        return self._call(
-            "lint_drawing",
-            {
-                "svg_path": svg_path,
-                "drawing_scale": drawing_scale,
-                "view_shape_names": view_shape_names,
-            },
-            self._SHORT_TIMEOUT,
-        )
-
-    def render_drawing(self, svg_path: str, width: int = 0, save_to: str = "") -> dict:
-        return self._call(
-            "render_drawing",
-            {"svg_path": svg_path, "width": width, "save_to": save_to},
-            self._RENDER_TIMEOUT,
-        )
-
-    def save_drawing_annotations(self, svg_path: str) -> str:
-        return self._call(
-            "save_drawing_annotations",
-            {"svg_path": svg_path},
-            self._SHORT_TIMEOUT,
-        )
-
-    def align_check(
-        self, object_a: str, object_b: str, axis: str = "Z", mode: str = "flush"
-    ) -> str:
-        return self._call(
-            "align_check",
-            {"object_a": object_a, "object_b": object_b, "axis": axis, "mode": mode},
-            self._GEOMETRY_TIMEOUT,
-        )
-
-    def resolve(self, object_name: str, selector: str, label: str = "") -> str:
-        return self._call(
-            "resolve",
-            {"object_name": object_name, "selector": selector, "label": label},
-            self._GEOMETRY_TIMEOUT,
-        )
-
-    def suggest_view_layout(
-        self,
-        object_name: str,
-        page_w: float = 297.0,
-        page_h: float = 210.0,
-        scale: float = 1.0,
-        views: list[str] | None = None,
-        title_block_w: float = 150.0,
-        title_block_h: float = 30.0,
-        margin: float = 10.0,
-        extents: list[float] | None = None,
-        centroid: list[float] | None = None,
-    ) -> str:
-        return self._call(
-            "suggest_view_layout",
-            {
-                "object_name": object_name,
-                "page_w": page_w,
-                "page_h": page_h,
-                "scale": scale,
-                "views": views,
-                "title_block_w": title_block_w,
-                "title_block_h": title_block_h,
-                "margin": margin,
-                "extents": extents,
-                "centroid": centroid,
-            },
-            self._GEOMETRY_TIMEOUT,
-        )
-
-    def script(self, save_to: str = "") -> str:
-        return self._call("script", {"save_to": save_to}, self._SHORT_TIMEOUT)
-
-    def search_library(self, query: str = "") -> str:
-        return self._call("search_library", {"query": query}, self._SHORT_TIMEOUT)
-
-    def load_part(self, name: str, params: str = "") -> str:
-        # Library part scripts can build heavy geometry (threads, gears) just
-        # like a STEP import, so honour the exec-timeout knob here too (#229).
-        timeout = max(self._GEOMETRY_TIMEOUT, self._exec_timeout)
-        return self._call("load_part", {"name": name, "params": params}, timeout)
+        proxy.__name__ = name
+        return proxy
 
 
 class InProcessSession(WorkerSession):
@@ -704,7 +554,7 @@ class InProcessSession(WorkerSession):
     def reset(self) -> str:
         # The base method short-circuits via self._proc.is_alive(); there is
         # no process here, so always dispatch the real reset.
-        return self._call("reset", {}, self._SHORT_TIMEOUT)
+        return self._call("reset", {}, _SHORT_TIMEOUT)
 
     def _call(self, op: str, args: dict, timeout: int) -> Any:
         # Same error contract as the worker path: tool exceptions surface as
