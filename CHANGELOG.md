@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.43 — 2026-06-10
+
+### Dependencies
+
+- **build123d-drafting-helpers floor raised to 0.4.2.** The drawing skill relies on `choose_scale()` for page/scale selection and on `view_annotation_overlap` lint results; 0.4.2 adds ISO 5455 enlargement scales (10:1, 5:1) so small precision parts get legible drawings, and stops the overlap lint false-positiving on centrelines and witness lines. (#232)
+
+---
+
 ## v0.3.42 — 2026-06-09
 
 ### Documentation
