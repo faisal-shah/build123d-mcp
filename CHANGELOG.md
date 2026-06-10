@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.46 — 2026-06-10
+
+### Features
+
+- **`--in-process` mode for MCP hosts that block subprocess creation.** Under some sandboxed hosts (reported with Codex desktop on Windows, #143) the worker subprocess never starts and every `execute()` fails. `--in-process` / `BUILD123D_IN_PROCESS=1` runs the CAD session inside the server process with the full tool surface. Trade-offs, stated plainly: no crash containment and no execution timeouts on Windows. The worker-startup failure message now reports the worker's exit code and points at this flag. (#143, #248)
+
+---
+
 ## v0.3.45 — 2026-06-10
 
 ### Features
