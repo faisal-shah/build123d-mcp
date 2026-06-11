@@ -68,6 +68,7 @@ Read-only MCP resources available to LLM clients:
 - `build123d://quickref` — build123d API quick reference (primitives, booleans, positioning, selectors, fillets)
 - `build123d://selectors` — task-indexed selector cookbook (get the top face, find circular edges, filter by area/length/radius, `Select.LAST` in builder context, fillet detection)
 - `build123d://drafting` — code-first 2D engineering drawings cookbook (project a 3D part, dimension with ExtensionLine/DimensionLine, tolerances, hole-table pattern, multi-view sheet, title block, export to DXF)
+- `build123d://drafting-api` — API reference for build123d-drafting-helpers, generated from the installed library (exact signatures for Dimension, Leader, TitleBlock, Drawing, and every other public symbol)
 - `build123d://session` — live session state as JSON (current shape, named objects, snapshots, variables)
 - `build123d://bd_warehouse` — catalogue of pre-built parametric parts from bd_warehouse (bearings, fasteners, gears, pipes, threads, and more)
 

@@ -68,13 +68,21 @@ What `make_drawing` does **not** do: spiral/freeform profile dimensions,
 cross-hole callouts that need a section, GD&T / datums, or non-standard layouts.
 If you need those, go to Step 2.
 
+The automatic dimensions and centrelines assume a broadly rotationally
+symmetric part (shafts, flanges, turned parts). For prismatic parts — plates
+with hole patterns, pockets, slots — expect to clear `dwg.annotations`
+wholesale in Step 2 and place dimensions yourself.
+
 ---
 
 ## Step 2 — Customise with the Drawing builder
 
 When the automatic drawing is close but needs edits, swap `make_drawing` for
 `build_drawing`. It runs the identical pipeline but returns a live `Drawing`
-**before** export, so your edits land in the output:
+**before** export, so your edits land in the output. For exact signatures and
+keyword names of every class and function used below (`Dimension`, `Leader`,
+`TitleBlock`, `Drawing` methods, ...), read the `build123d://drafting-api`
+resource — it is generated from the installed library, so it always matches:
 
 ```python
 from build123d_drafting import build_drawing, Leader
@@ -144,6 +152,11 @@ build123d renders text as glyph paths, so label strings are irrecoverable from
 a finished SVG — `save_drawing_annotations` writes a `.dims.json` sidecar that
 `inspect_drawing(svg_path=...)` reads back, letting you (or a later session)
 inspect page size, layers, and annotation content without rebuilding anything.
+
+The sidecar only captures annotations registered **in this session** via
+`annotate()`. If the SVG was produced by a standalone script (Step 4), the
+annotations live in that script's process and the tool will tell you nothing
+was written — re-exporting the sidecar is then the script's job.
 
 ---
 

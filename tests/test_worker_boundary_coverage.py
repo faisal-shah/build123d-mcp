@@ -239,6 +239,7 @@ NON_SMOKED_OPS = {
     "import_cad_file": "requires an external CAD file on disk",
     "view_axes": "pure: the helper takes no session (analytic axis mapping)",
     "render_drawing": "pure: rasterises an SVG file from disk; helper takes no session",
+    "drafting_api": "pure: introspects the installed drafting-helpers; session arg unused",
     "health_check": "pure: builds its own Box to probe render/export; session arg unused",
     "lint_drawing": "reads drawing-annotation state, not the geometry seed",
     "save_drawing_annotations": "reads drawing-annotation state, not the geometry seed",
