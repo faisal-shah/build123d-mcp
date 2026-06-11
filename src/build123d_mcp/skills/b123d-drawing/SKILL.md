@@ -133,6 +133,18 @@ complete, dimensions are legible and not colliding, and the title block reads
 correctly. `view_annotation_overlap` warnings from the lint step usually show up
 here as cramped leaders — fix them with the builder (Step 2) if they matter.
 
+Then preserve the label metadata and check the exported file itself:
+
+```
+mcp__build123d-mcp__save_drawing_annotations(svg_path='drawings/part_name.svg')
+mcp__build123d-mcp__inspect_drawing(svg_path='drawings/part_name.svg')
+```
+
+build123d renders text as glyph paths, so label strings are irrecoverable from
+a finished SVG — `save_drawing_annotations` writes a `.dims.json` sidecar that
+`inspect_drawing(svg_path=...)` reads back, letting you (or a later session)
+inspect page size, layers, and annotation content without rebuilding anything.
+
 ---
 
 ## Step 4 — Save a standalone regeneration script (default)
