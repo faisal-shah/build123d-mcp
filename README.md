@@ -22,11 +22,21 @@ When using an AI to write build123d scripts, the AI writes blind — it cannot s
 - `measure` — full geometric summary: volume, area, topology, bounding box, centre of mass, inertia tensor, face-type inventory
 - `clearance` — minimum distance (mm) between two named shapes
 - `cross_sections` — cross-sectional areas at evenly spaced planes along X/Y/Z; useful for detecting voids and wall-thickness variation
+- `resolve` — evaluate a selector expression (e.g. `.faces().filter_by(Axis.Z).last()`) against a named object and return a geometry descriptor
+- `analyze_printability` — BREP-exact FDM printability analysis: overhangs, thin walls, minimum features, bed fit, tip-over risk
 - `session_state` — full JSON snapshot of active shapes, named objects, snapshot names, and Python namespace variables
 - `last_error` — details of the last failed `execute()`: type, message, line number, and code excerpt
 
 **Viewing**
 - `render_view` — render one or more shapes as PNG / SVG / DXF; auto-detects 3D vs 2D inputs (composed dimensioned drawings via `build123d.drafting` rasterise via ezdxf+matplotlib); supports assembly compositing, high-quality tessellation, cross-section clip planes, and optional labels for named shapes or specific faces/edges
+
+**Engineering drawings**
+- `suggest_view_layout` — auto-calculate safe page positions for a standard multi-view drawing layout
+- `view_axes` — world-to-page axis mapping for a projected view, computed analytically before rendering
+- `render_drawing` — rasterise an SVG file from disk to PNG
+- `inspect_drawing` — structured bbox/annotation report for a 2D drawing (session objects or an SVG on disk)
+- `lint_drawing` — structural drawing-quality checks: label/geometry divergence, overlapping annotations, page overshoot
+- `save_drawing_annotations` — write a `.dims.json` sidecar capturing label metadata alongside an exported SVG
 
 **Import / export**
 - `export` — export as STEP / STL / DXF / SVG (or comma-separated like `step,stl`); auto-detects 2D vs 3D shape and routes to the appropriate format; targets a named object, the current shape, or `*` for all objects as an assembly
@@ -34,6 +44,7 @@ When using an AI to write build123d scripts, the AI writes blind — it cannot s
 
 **Comparison**
 - `shape_compare` — compare two named shapes by volume, bbox, topology, and centre offset
+- `align_check` — check alignment between two named objects along an axis (flush / center / clearance modes)
 
 **Session checkpoints**
 - `save_snapshot` / `restore_snapshot` / `diff_snapshot` — checkpoint, recover, and compare geometric state
@@ -47,6 +58,8 @@ When using an AI to write build123d scripts, the AI writes blind — it cannot s
 - `health_check` — verify VTK/SVG/STEP/STL dependencies work end-to-end
 - `repair_hints` — get targeted fix suggestions for a given `execute()` error message
 - `workflow_hints` — guidance on using the tools effectively
+- `script` — assemble a reproducible Python script from the session's executed code blocks
+- `install_skill` — copy a b123d workflow skill (modeling or drawing) into the current project
 
 ## Resources
 
