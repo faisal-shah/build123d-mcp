@@ -9,7 +9,6 @@ from build123d_mcp.tools.diff import diff_snapshot
 from build123d_mcp.tools.execute import execute_code
 from build123d_mcp.tools.export import export_file
 from build123d_mcp.tools.health_check import health_check
-from build123d_mcp.tools.interference import interference
 from build123d_mcp.tools.list_objects import list_objects
 from build123d_mcp.tools.measure import measure
 from build123d_mcp.tools.render import render_view
@@ -1523,44 +1522,6 @@ def test_render_view_mixed_color_and_palette(session):
     execute_code(session, "show(Box(10, 10, 10), 'a')\nshow(Cylinder(5, 20), 'b')")
     out = render_view(session, "iso", "a:green,b")
     assert out["png"][:8] == PNG_MAGIC
-
-
-# --- interference check (issue #13) ---
-
-
-def test_interference_overlapping(session):
-    execute_code(
-        session, "show(Box(10, 10, 10), 'a')\nshow(Box(10, 10, 10).move(Location((5, 0, 0))), 'b')"
-    )
-    data = json.loads(interference(session, "a", "b"))
-    assert data["interferes"] is True
-    assert data["volume"] > 0
-
-
-def test_interference_non_overlapping(session):
-    execute_code(
-        session, "show(Box(10, 10, 10), 'a')\nshow(Box(10, 10, 10).move(Location((20, 0, 0))), 'b')"
-    )
-    data = json.loads(interference(session, "a", "b"))
-    assert data["interferes"] is False
-    assert data["volume"] == 0.0
-
-
-def test_interference_returns_bounds(session):
-    execute_code(
-        session, "show(Box(10, 10, 10), 'a')\nshow(Box(10, 10, 10).move(Location((5, 0, 0))), 'b')"
-    )
-    data = json.loads(interference(session, "a", "b"))
-    assert "bounds" in data
-    bounds = data["bounds"]
-    for key in ("xmin", "xmax", "ymin", "ymax", "zmin", "zmax"):
-        assert key in bounds
-
-
-def test_interference_unknown_object_raises(session):
-    execute_code(session, "show(Box(10, 10, 10), 'a')")
-    with pytest.raises(ValueError, match="Unknown object"):
-        interference(session, "a", "missing")
 
 
 # --- measure topology ---

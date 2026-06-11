@@ -28,7 +28,6 @@ tools/execute.py   — Thin wrapper delegating to session.execute()
 tools/render.py    — pyvista-based PNG rendering; headless (xvfb) if no DISPLAY
 tools/measure.py   — Geometry queries returning JSON (bounding_box, volume, area, wall thickness, clearance)
 tools/export.py    — STEP/STL export; path traversal blocked
-tools/interference.py — Boolean intersection check between two named shapes
 ```
 
 ## Adding a new tool
@@ -82,7 +81,6 @@ Known limits: memory exhaustion is not bounded; Python introspection chains can 
 - `restore_snapshot()` restores geometry only; Python variables set after the snapshot remain in scope.
 - `show()` stores shapes by reference; mutating the shape object after calling `show()` will affect the stored object.
 - Clip plane in `render_view` slices at the mesh's own bounding-box midpoint, not world origin.
-- Interference uses a 1 × 10⁻⁶ mm³ volume threshold to ignore floating-point noise.
 
 ## Releasing
 

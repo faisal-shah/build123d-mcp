@@ -102,7 +102,6 @@ def worker_main(
 # only for ops that read session bookkeeping without touching geometry kernels.
 _RENDER_TIMEOUT = 120
 _EXPORT_TIMEOUT = 60
-_INTERFERENCE_TIMEOUT = 30
 _GEOMETRY_TIMEOUT = 60
 _SHORT_TIMEOUT = 10
 
@@ -438,10 +437,6 @@ class WorkerSession:
 
     @_op(_tool(f"{_T}.export:export_file"), _EXPORT_TIMEOUT)
     def export_file(self, filename: str, format: str = "step", object_name: str = "") -> str:
-        raise NotImplementedError
-
-    @_op(_tool(f"{_T}.interference:interference"), _INTERFERENCE_TIMEOUT)
-    def interference(self, object_a: str, object_b: str) -> str:
         raise NotImplementedError
 
     @_op(_tool(f"{_T}.measure:measure"), _GEOMETRY_TIMEOUT)

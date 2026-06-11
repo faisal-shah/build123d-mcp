@@ -111,11 +111,6 @@ def _clearance(ws, tmp_path):
     assert "error" not in r and "status" in r
 
 
-def _interference(ws, tmp_path):
-    r = json.loads(ws.interference("a", "b"))
-    assert "error" not in r and "interferes" in r
-
-
 def _shape_compare(ws, tmp_path):
     r = json.loads(ws.shape_compare("a", "b"))
     assert "error" not in r and "delta" in r
@@ -215,7 +210,6 @@ def _render_view(ws, tmp_path):
 SESSION_STATEFUL_TOOLS = {
     "measure": _measure,
     "clearance": _clearance,
-    "interference": _interference,
     "shape_compare": _shape_compare,
     "align_check": _align_check,
     "cross_sections": _cross_sections,
