@@ -636,6 +636,10 @@ def suggest_view_layout(
 
     Returns JSON with:
       views: {name: {VIEW_X, VIEW_Y, half_w, half_h, look_at, camera, up}}
+      free_space: {name: {above/below: {x, y, h}, left/right: {x, y, w}}} — the
+        empty rectangle outside each view edge, bounded by neighbouring views,
+        the title block, and the margins; budget dimension tiers (n × tier
+        pitch must fit in h/w) before placing annotations
       warnings: list of layout problems (out-of-bounds, title-block overlap)
       suggestion: recommended page_w/page_h/scale if the layout does not fit
 

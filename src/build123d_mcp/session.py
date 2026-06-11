@@ -317,16 +317,21 @@ class Session:
 
             Args:
                 name: file stem — letters, digits, ., _, - only (no path
-                    separators); the file lands in the server's scratch dir.
+                    separators); the file lands in a per-process scratch dir,
+                    so two servers running side by side cannot clobber each
+                    other's files.
                 obj: any JSON-serializable structure; non-serializable values
                     fall back to str().
 
             Returns the absolute path of the written .json file.
             """
             import json
+            import os
             import re
             import tempfile
             from pathlib import Path
+
+            from build123d_mcp.tools._paths import safe_output_path
 
             if not re.fullmatch(_SAVE_JSON_STEM, name):
                 raise ValueError(
@@ -339,9 +344,11 @@ class Session:
                     f"save_json payload is {len(payload)} bytes; the cap is "
                     f"{_SAVE_JSON_MAX_BYTES}. Split the data into smaller files."
                 )
-            out_dir = Path(tempfile.gettempdir()) / "build123d-mcp"
+            out_dir = Path(tempfile.gettempdir()) / "build123d-mcp" / f"pid-{os.getpid()}"
             out_dir.mkdir(parents=True, exist_ok=True)
-            path = out_dir / f"{name}.json"
+            # Belt and braces: route the final path through the same write
+            # policy every file-writing tool uses.
+            path = Path(safe_output_path(str(out_dir / f"{name}.json")))
             path.write_text(payload)
             print(f"Saved {len(payload)} bytes of JSON to {path}")
             return str(path)

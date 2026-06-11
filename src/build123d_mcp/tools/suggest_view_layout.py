@@ -108,6 +108,18 @@ def _layout(
     return pos
 
 
+def _title_block_rect(
+    page_w: float, margin: float, title_block_w: float, title_block_h: float
+) -> tuple[float, float, float, float]:
+    """(left, right, bottom, top) of the title-block reservation, page space."""
+    return (page_w - margin - title_block_w, page_w - margin, margin, margin + title_block_h)
+
+
+def _spans_overlap(a_lo: float, a_hi: float, b_lo: float, b_hi: float) -> bool:
+    """True when the open intervals (a_lo, a_hi) and (b_lo, b_hi) intersect."""
+    return b_lo < a_hi and b_hi > a_lo
+
+
 def _check_fits(
     pos: dict[str, tuple[float, float]],
     hw: dict[str, tuple[float, float]],
@@ -118,8 +130,7 @@ def _check_fits(
     title_block_h: float,
 ) -> list[str]:
     warnings: list[str] = []
-    tb_left = page_w - margin - title_block_w
-    tb_top = margin + title_block_h
+    tb_left, _, _, tb_top = _title_block_rect(page_w, margin, title_block_w, title_block_h)
 
     for vname, (vx, vy) in pos.items():
         vhw, vhh = hw[vname]
@@ -174,36 +185,24 @@ def _free_space(
         for v in pos
     }
     obstacles = dict(rects)
-    obstacles["_title_block"] = (
-        page_w - margin - title_block_w,
-        page_w - margin,
-        margin,
-        margin + title_block_h,
-    )
+    obstacles["_title_block"] = _title_block_rect(page_w, margin, title_block_w, title_block_h)
 
     out: dict[str, Any] = {}
     for v, (left, right, bottom, top) in rects.items():
-        others = [ob for name, ob in obstacles.items() if name != v]
-
-        def x_overlaps(ob: tuple[float, float, float, float]) -> bool:
-            return ob[0] < right and ob[1] > left
-
-        def y_overlaps(ob: tuple[float, float, float, float]) -> bool:
-            return ob[2] < top and ob[3] > bottom
-
-        above = min(
-            [max(ob[2], top) for ob in others if x_overlaps(ob) and ob[3] > top] + [page_h - margin]
-        )
-        below = max(
-            [min(ob[3], bottom) for ob in others if x_overlaps(ob) and ob[2] < bottom] + [margin]
-        )
-        west = max(
-            [min(ob[1], left) for ob in others if y_overlaps(ob) and ob[0] < left] + [margin]
-        )
-        east = min(
-            [max(ob[0], right) for ob in others if y_overlaps(ob) and ob[1] > right]
-            + [page_w - margin]
-        )
+        x_hits = [
+            ob
+            for name, ob in obstacles.items()
+            if name != v and _spans_overlap(left, right, ob[0], ob[1])
+        ]
+        y_hits = [
+            ob
+            for name, ob in obstacles.items()
+            if name != v and _spans_overlap(bottom, top, ob[2], ob[3])
+        ]
+        above = min([max(ob[2], top) for ob in x_hits if ob[3] > top] + [page_h - margin])
+        below = max([min(ob[3], bottom) for ob in x_hits if ob[2] < bottom] + [margin])
+        west = max([min(ob[1], left) for ob in y_hits if ob[0] < left] + [margin])
+        east = min([max(ob[0], right) for ob in y_hits if ob[1] > right] + [page_w - margin])
         out[v] = {
             "above": {
                 "x": [round(left, 2), round(right, 2)],

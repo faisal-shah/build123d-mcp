@@ -27,8 +27,13 @@ def _class_entry(name: str, cls: type) -> list[str]:
     doc = _first_doc_line(cls)
     if doc:
         lines.append(f"    {doc}")
-    for mname, method in sorted(vars(cls).items()):
-        if mname.startswith("_") or not callable(method):
+    for mname in sorted(vars(cls)):
+        if mname.startswith("_"):
+            continue
+        # getattr resolves classmethod/staticmethod descriptors to callables
+        # with real signatures; raw vars() values would inspect as "(...)".
+        method = getattr(cls, mname, None)
+        if not callable(method):
             continue
         lines.append(f"    .{mname}{_signature(method)}")
         mdoc = _first_doc_line(method)

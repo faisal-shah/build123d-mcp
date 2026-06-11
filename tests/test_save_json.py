@@ -22,10 +22,15 @@ def test_round_trip(session):
     assert json.loads(path.read_text()) == {"holes": [3.2, 4.5], "n": 2}
 
 
-def test_returns_path_inside_scratch_dir(session):
+def test_returns_path_inside_per_process_scratch_dir(session):
+    import os
+
     session.execute("p = save_json('scratch_dir_test', [1, 2])")
     path = Path(session.namespace["p"])
-    assert path.parent.name == "build123d-mcp"
+    # Per-process scoping: two servers running side by side must not clobber
+    # each other's files.
+    assert path.parent.name == f"pid-{os.getpid()}"
+    assert path.parent.parent.name == "build123d-mcp"
     assert path.name == "scratch_dir_test.json"
 
 
