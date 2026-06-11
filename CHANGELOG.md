@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.3.48 — 2026-06-11
+
+### Features
+
+- **`save_json(name, obj)` sandbox helper** — the sanctioned structured-output channel for `execute()` (#259). JSON-serializes analysis data (face inventories, hole tables, section data) to a per-process server scratch dir with a validated stem and 10 MB cap, returning the path for the caller to read back. `open()`/`os` remain blocked.
+- **`build123d://drafting-api` MCP resource** — API reference for build123d-drafting-helpers generated from the installed library with `inspect`, so signatures never drift across releases (#260). Pointed to from the drawing skill.
+- **`suggest_view_layout` now reports per-view `free_space` bands** — the empty rectangle outside each view edge, clipped against neighbouring views, the title block, and the page margins, so agents can budget dimension tiers before placing annotations (#261).
+
+### Fixed
+
+- **`save_drawing_annotations` no longer writes an empty sidecar** when the session has no registered annotations (e.g. the drawing was built by a standalone regeneration script) — it returns a warning explaining where the annotations live instead (#258). Path validation still runs first, so invalid destinations fail loudly regardless.
+
+### Documentation
+
+- Drawing skill: sidecar limitation for script-built drawings, prismatic-part caveat on `make_drawing`'s automatic annotations, and a pointer to `build123d://drafting-api`.
+
+---
+
 ## v0.3.47 — 2026-06-11
 
 ### Fixed
