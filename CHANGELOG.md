@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.3.47 — 2026-06-11
+
+### Fixed
+
+- **`render_view` azimuth/elevation now respect the view's up vector.** The camera-orbit math previously assumed Z-up for every direction preset, so `azimuth`/`elevation` produced wrong rotations on the top view. Both rotations now use Rodrigues' formula about the correct axes (up for azimuth, camera-right for elevation, mirroring VTK's `Azimuth()`/`Elevation()`), with the up vector carried along. Z-up views (front/side/iso) are bit-for-bit unchanged. (#222, #249)
+
+### Changed
+
+- **Removed the deprecated `interference` tool.** `clearance()` is the replacement and reports strictly more (status, containment, overlap volumes). Breaking only for clients still calling `interference`. (#217, #251, #253)
+- **`render_view`'s docstring trimmed ~220 words** to cut per-request token cost; all parameter documentation retained. (#217, #251)
+
+### Internal
+
+- **Worker ops are now a single table.** The dispatch if-chain and ~28 hand-written `WorkerSession` proxy methods collapsed into one `_OPS` table populated by `@_op`-decorated typed stub methods — one definition site per op (signature, timeout, worker handler together) with full mypy/IDE signatures preserved. New tests pin that every op is reachable and that stub defaults match the tool-function defaults. (#220, #252)
+- Deduplicated the syntax-excerpt and clip-plane-split logic. (#221, #250)
+
+### Documentation
+
+- README's Tools section now lists all 31 registered tools (the drawing-tooling and printability families were missing); the drawing skill's Verify step covers `save_drawing_annotations` + `inspect_drawing`. (#255)
+
+---
+
 ## v0.3.46 — 2026-06-10
 
 ### Features
