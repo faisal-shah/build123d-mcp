@@ -201,3 +201,39 @@ def test_part_size_included(session_with_box):
     assert abs(ps["x"] - 40.0) < 0.01
     assert abs(ps["y"] - 20.0) < 0.01
     assert abs(ps["z"] - 15.0) < 0.01
+
+
+# --- free_space bands (#261) ---
+
+
+def test_free_space_present_for_every_view(session_with_box):
+    r = json.loads(suggest_view_layout(session_with_box, "shape"))
+    assert set(r["free_space"]) == set(r["views"])
+    for bands in r["free_space"].values():
+        assert set(bands) == {"above", "below", "left", "right"}
+
+
+def test_front_above_band_stops_at_plan_view(session_with_box):
+    r = json.loads(suggest_view_layout(session_with_box, "shape"))
+    plan_bottom = r["views"]["plan"]["VIEW_Y"] - r["views"]["plan"]["half_h"]
+    band = r["free_space"]["front"]["above"]
+    assert band["y"][1] == pytest.approx(plan_bottom, abs=0.02)
+    assert band["h"] == pytest.approx(band["y"][1] - band["y"][0], abs=0.02)
+
+
+def test_bands_never_negative_even_when_layout_overflows(session_with_box):
+    # Force a layout that cannot fit so views collide with margins/title block.
+    r = json.loads(suggest_view_layout(session_with_box, "shape", scale=20.0))
+    for bands in r["free_space"].values():
+        for key in ("above", "below"):
+            assert bands[key]["h"] >= 0
+        for key in ("left", "right"):
+            assert bands[key]["w"] >= 0
+
+
+def test_band_x_range_matches_view_width(session_with_box):
+    r = json.loads(suggest_view_layout(session_with_box, "shape"))
+    v = r["views"]["front"]
+    band = r["free_space"]["front"]["above"]
+    assert band["x"][0] == pytest.approx(v["VIEW_X"] - v["half_w"], abs=0.02)
+    assert band["x"][1] == pytest.approx(v["VIEW_X"] + v["half_w"], abs=0.02)

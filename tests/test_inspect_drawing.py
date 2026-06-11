@@ -385,6 +385,17 @@ class TestSaveDrawingAnnotations:
 
         return json.loads(inspect_drawing(session, objects))
 
+    def test_empty_session_warns_and_writes_nothing(self, session, tmp_path):
+        # A drawing built by a standalone script leaves this session with zero
+        # annotations; writing an empty sidecar would silently hide that (#258).
+        from build123d_mcp.tools.save_drawing_annotations import save_drawing_annotations
+
+        svg_path = str(tmp_path / "drawing.svg")
+        result = save_drawing_annotations(session, svg_path)
+        assert result.startswith("Warning")
+        assert "standalone script" in result
+        assert not (tmp_path / "drawing.dims.json").exists()
+
     def test_save_writes_dims_json(self, session, tmp_path):
         from build123d_mcp.tools.save_drawing_annotations import save_drawing_annotations
 

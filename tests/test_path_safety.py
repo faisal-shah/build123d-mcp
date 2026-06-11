@@ -106,6 +106,9 @@ def test_save_drawing_annotations_outside_roots_rejected(session):
 
 
 def test_save_drawing_annotations_tmp_allowed(session, tmp_path):
+    # An empty session no longer writes a useless sidecar (#258) — seed one
+    # annotation so the path-policy success case still exercises the write.
+    session.drawing_annotations["width"] = {"label_str": "20"}
     svg_path = str(tmp_path / "drawing.svg")
     result = save_drawing_annotations(session, svg_path)
     assert (tmp_path / "drawing.dims.json").exists()

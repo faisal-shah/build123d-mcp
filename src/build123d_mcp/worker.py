@@ -530,6 +530,10 @@ class WorkerSession:
     def save_drawing_annotations(self, svg_path: str) -> str:
         raise NotImplementedError
 
+    @_op(_tool(f"{_T}.drafting_api:drafting_api"), _SHORT_TIMEOUT)
+    def drafting_api(self) -> str:
+        raise NotImplementedError
+
     @_op(_tool(f"{_T}.align_check:align_check"), _GEOMETRY_TIMEOUT)
     def align_check(
         self, object_a: str, object_b: str, axis: str = "Z", mode: str = "flush"

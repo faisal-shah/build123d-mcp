@@ -152,6 +152,83 @@ def _check_fits(
     return warnings
 
 
+def _free_space(
+    pos: dict[str, tuple[float, float]],
+    hw: dict[str, tuple[float, float]],
+    page_w: float,
+    page_h: float,
+    margin: float,
+    title_block_w: float,
+    title_block_h: float,
+) -> dict[str, Any]:
+    """Per-view free rectangles between each view edge and the nearest obstacle.
+
+    Obstacles are the other views' bboxes and the title block; the page margin
+    bounds every band. above/below bands span the view's own width, left/right
+    bands its own height — the space available for dimension tiers and leader
+    labels outside that edge (#261). An obstacle already intruding past the
+    edge collapses the band to zero rather than reporting phantom space.
+    """
+    rects = {
+        v: (pos[v][0] - hw[v][0], pos[v][0] + hw[v][0], pos[v][1] - hw[v][1], pos[v][1] + hw[v][1])
+        for v in pos
+    }
+    obstacles = dict(rects)
+    obstacles["_title_block"] = (
+        page_w - margin - title_block_w,
+        page_w - margin,
+        margin,
+        margin + title_block_h,
+    )
+
+    out: dict[str, Any] = {}
+    for v, (left, right, bottom, top) in rects.items():
+        others = [ob for name, ob in obstacles.items() if name != v]
+
+        def x_overlaps(ob: tuple[float, float, float, float]) -> bool:
+            return ob[0] < right and ob[1] > left
+
+        def y_overlaps(ob: tuple[float, float, float, float]) -> bool:
+            return ob[2] < top and ob[3] > bottom
+
+        above = min(
+            [max(ob[2], top) for ob in others if x_overlaps(ob) and ob[3] > top] + [page_h - margin]
+        )
+        below = max(
+            [min(ob[3], bottom) for ob in others if x_overlaps(ob) and ob[2] < bottom] + [margin]
+        )
+        west = max(
+            [min(ob[1], left) for ob in others if y_overlaps(ob) and ob[0] < left] + [margin]
+        )
+        east = min(
+            [max(ob[0], right) for ob in others if y_overlaps(ob) and ob[1] > right]
+            + [page_w - margin]
+        )
+        out[v] = {
+            "above": {
+                "x": [round(left, 2), round(right, 2)],
+                "y": [round(top, 2), round(above, 2)],
+                "h": round(max(0.0, above - top), 2),
+            },
+            "below": {
+                "x": [round(left, 2), round(right, 2)],
+                "y": [round(below, 2), round(bottom, 2)],
+                "h": round(max(0.0, bottom - below), 2),
+            },
+            "left": {
+                "x": [round(west, 2), round(left, 2)],
+                "y": [round(bottom, 2), round(top, 2)],
+                "w": round(max(0.0, left - west), 2),
+            },
+            "right": {
+                "x": [round(right, 2), round(east, 2)],
+                "y": [round(bottom, 2), round(top, 2)],
+                "w": round(max(0.0, east - right), 2),
+            },
+        }
+    return out
+
+
 def suggest_view_layout(
     session,
     object_name: str,
@@ -167,7 +244,10 @@ def suggest_view_layout(
 ) -> str:
     """Compute safe VIEW_X / VIEW_Y positions for a multi-view engineering drawing.
 
-    Returns JSON with per-view positions, camera/up/look_at values, and any
+    Returns JSON with per-view positions, camera/up/look_at values, per-view
+    ``free_space`` bands (the empty rectangle outside each view edge, bounded
+    by neighbouring views, the title block, and the margins — budget dimension
+    tiers against its ``h``/``w`` before placing annotations), and any
     warnings (out-of-bounds, title-block overlap).  If the layout does not fit,
     an alternative scale or page size is suggested.
 
@@ -277,6 +357,7 @@ def suggest_view_layout(
 
     result: dict[str, Any] = {
         "views": out_views,
+        "free_space": _free_space(pos, hw, page_w, page_h, margin, title_block_w, title_block_h),
         "page_w": page_w,
         "page_h": page_h,
         "scale": scale,

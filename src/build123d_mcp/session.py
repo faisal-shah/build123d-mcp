@@ -21,8 +21,14 @@ _INJECTED = frozenset(
         "annotate",
         "register_centerline",
         "set_page",
+        "save_json",
     }
 )
+
+# save_json: cap on the serialized payload, and the only characters allowed in
+# a file stem (no path separators, so the write cannot leave _SAVE_JSON_DIR).
+_SAVE_JSON_MAX_BYTES = 10_000_000
+_SAVE_JSON_STEM = r"[A-Za-z0-9_.-]+"
 
 
 class Session:
@@ -300,6 +306,47 @@ class Session:
             return result
 
         self.namespace["find_edges"] = find_edges
+
+        def save_json(name: str, obj: Any) -> str:
+            """Write obj as JSON to a server-controlled scratch file; return its path.
+
+            The sanctioned structured-output channel (#259): the sandbox blocks
+            open()/os, and large prints are fragile in transit, so analysis
+            results (face inventories, hole tables, section data) should leave
+            the session as a file the caller Reads back.
+
+            Args:
+                name: file stem — letters, digits, ., _, - only (no path
+                    separators); the file lands in the server's scratch dir.
+                obj: any JSON-serializable structure; non-serializable values
+                    fall back to str().
+
+            Returns the absolute path of the written .json file.
+            """
+            import json
+            import re
+            import tempfile
+            from pathlib import Path
+
+            if not re.fullmatch(_SAVE_JSON_STEM, name):
+                raise ValueError(
+                    f"save_json name must match {_SAVE_JSON_STEM} (no path "
+                    f"separators), got {name!r}"
+                )
+            payload = json.dumps(obj, indent=2, default=str)
+            if len(payload) > _SAVE_JSON_MAX_BYTES:
+                raise ValueError(
+                    f"save_json payload is {len(payload)} bytes; the cap is "
+                    f"{_SAVE_JSON_MAX_BYTES}. Split the data into smaller files."
+                )
+            out_dir = Path(tempfile.gettempdir()) / "build123d-mcp"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            path = out_dir / f"{name}.json"
+            path.write_text(payload)
+            print(f"Saved {len(payload)} bytes of JSON to {path}")
+            return str(path)
+
+        self.namespace["save_json"] = save_json
 
     def _shape_summary(self, shape) -> dict | None:
         """Pull volume/bbox/topology from a shape; None if anything errors."""

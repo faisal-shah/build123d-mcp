@@ -41,7 +41,7 @@ def configure(session: WorkerSession) -> None:
 
 @mcp.tool()
 def execute(code: str) -> str:
-    """Execute build123d Python code in the persistent session. Errors include automatic fix hints — read them before retrying. Use show(shape, name) to register named objects (name defaults to 'shape'); show() immediately prints volume and face count confirming the shape is non-empty. After any boolean operation (-, +, &) call measure() to confirm it succeeded (check topology.faces). named_face(shape, name) is a built-in helper: named_face(box, 'top') returns the highest-Z face, 'bottom'/'front'/'back'/'left'/'right' work similarly. find_edges(shape, geom='circle', radius=4.25, at_z=10.2, length=None, tol=0.05) filters edges for fillet/chamfer selection and prints what matched."""
+    """Execute build123d Python code in the persistent session. Errors include automatic fix hints — read them before retrying. Use show(shape, name) to register named objects (name defaults to 'shape'); show() immediately prints volume and face count confirming the shape is non-empty. After any boolean operation (-, +, &) call measure() to confirm it succeeded (check topology.faces). named_face(shape, name) is a built-in helper: named_face(box, 'top') returns the highest-Z face, 'bottom'/'front'/'back'/'left'/'right' work similarly. find_edges(shape, geom='circle', radius=4.25, at_z=10.2, length=None, tol=0.05) filters edges for fillet/chamfer selection and prints what matched. save_json(name, obj) writes structured analysis data (face inventories, hole tables) to a server scratch file and returns its path — use it instead of printing large results; open()/os stay blocked."""
     from build123d_mcp.tools.execute import execute_code
 
     return execute_code(_session, code)
@@ -565,6 +565,16 @@ def build123d_drafting_cookbook() -> str:
     from build123d_mcp.drafting_cookbook import build_drafting_cookbook_text
 
     return build_drafting_cookbook_text()
+
+
+@mcp.resource(
+    "build123d://drafting-api",
+    mime_type="text/plain",
+    description="Auto-generated API reference for build123d-drafting-helpers: exact signatures and one-line descriptions for every public class (Dimension, Leader, TitleBlock, Drawing, ...) and function, generated from the installed library so it always matches what execute() imports.",
+)
+def build123d_drafting_api() -> str:
+    """build123d-drafting-helpers API reference — generated from the installed library."""
+    return _session.drafting_api()
 
 
 @mcp.resource(
