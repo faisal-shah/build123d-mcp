@@ -14,13 +14,13 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Sets up xvfb on Linux and Mesa3D on Windows (no-op on macOS).
       # vtk 9.3.1 ships no cp313 wheel, so pin Python below to 3.12.
-      - uses: pyvista/setup-headless-display-action@v3
+      - uses: pyvista/setup-headless-display-action@v4
 
-      - uses: astral-sh/setup-uv@v5
+      - uses: astral-sh/setup-uv@v8.2.0
         with:
           enable-cache: true
           python-version: "3.12"
