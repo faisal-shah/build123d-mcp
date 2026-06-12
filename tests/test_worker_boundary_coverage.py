@@ -116,6 +116,18 @@ def _shape_compare(ws, tmp_path):
     assert "error" not in r and "delta" in r
 
 
+def _find_holes(ws, tmp_path):
+    # The seeded boxes have no holes; the empty parent proxy doesn't know 'a'
+    # at all, so a non-error reply proves the worker's objects were consulted.
+    r = json.loads(ws.find_holes("a"))
+    assert "error" not in r and r["holes"] == []
+
+
+def _find_bosses(ws, tmp_path):
+    r = json.loads(ws.find_bosses("a"))
+    assert "error" not in r and r["bosses"] == []
+
+
 def _align_check(ws, tmp_path):
     r = json.loads(ws.align_check("a", "b", mode="center"))
     assert "error" not in r and "delta" in r
@@ -212,6 +224,8 @@ SESSION_STATEFUL_TOOLS = {
     "clearance": _clearance,
     "shape_compare": _shape_compare,
     "align_check": _align_check,
+    "find_holes": _find_holes,
+    "find_bosses": _find_bosses,
     "cross_sections": _cross_sections,
     "resolve": _resolve,
     "suggest_view_layout": _suggest_view_layout,
