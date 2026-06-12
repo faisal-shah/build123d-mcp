@@ -49,7 +49,7 @@ def find_hole_patterns(session, object_name: str = "") -> str:
         return json.dumps({"error": str(exc)})
     patterns = []
     for p in _find_patterns(_find_holes(shape)):
-        rec = {"holes": [_record(h) for h in p.holes]}
+        rec: dict = {"holes": [_record(h) for h in p.holes]}
         if isinstance(p, BoltCircle):
             rec["type"] = "bolt_circle"
             rec["center"] = [round(c, 4) for c in p.center]
