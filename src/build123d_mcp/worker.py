@@ -534,6 +534,14 @@ class WorkerSession:
     def drafting_api(self) -> str:
         raise NotImplementedError
 
+    @_op(_tool(f"{_T}.find_features:find_holes"), _GEOMETRY_TIMEOUT)
+    def find_holes(self, object_name: str = "") -> str:
+        raise NotImplementedError
+
+    @_op(_tool(f"{_T}.find_features:find_bosses"), _GEOMETRY_TIMEOUT)
+    def find_bosses(self, object_name: str = "") -> str:
+        raise NotImplementedError
+
     @_op(_tool(f"{_T}.align_check:align_check"), _GEOMETRY_TIMEOUT)
     def align_check(
         self, object_a: str, object_b: str, axis: str = "Z", mode: str = "flush"

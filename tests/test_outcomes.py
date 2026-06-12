@@ -631,6 +631,8 @@ def test_mcp_lists_all_tools():
         "render_drawing",
         "save_drawing_annotations",
         "align_check",
+        "find_holes",
+        "find_bosses",
         "resolve",
         "script",
         "install_skill",
