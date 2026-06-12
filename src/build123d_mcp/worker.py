@@ -542,6 +542,10 @@ class WorkerSession:
     def find_bosses(self, object_name: str = "") -> str:
         raise NotImplementedError
 
+    @_op(_tool(f"{_T}.find_features:find_hole_patterns"), _GEOMETRY_TIMEOUT)
+    def find_hole_patterns(self, object_name: str = "") -> str:
+        raise NotImplementedError
+
     @_op(_tool(f"{_T}.align_check:align_check"), _GEOMETRY_TIMEOUT)
     def align_check(
         self, object_a: str, object_b: str, axis: str = "Z", mode: str = "flush"

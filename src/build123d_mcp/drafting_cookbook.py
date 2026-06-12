@@ -384,12 +384,17 @@ show(result, "three_view")""",
     Section(
         label="hole_table_pattern",
         text="""\
-## Hole callouts from the cylindrical-face inventory
-# build123d doesn't ship a HoleTable class, but the cylindrical faces give you
-# position and diameter. Point a Leader at each hole with a proper ⌀ callout
-# (⌀ + size + THRU/depth) — read the diameter from the face, don't hard-code it.
+## Hole callouts from feature recognition
+# Don't hand-roll hole detection from cylindrical faces — find_holes() returns
+# one record per drilled hole (coaxial drill + counterbore + spotface stacks
+# grouped, keyway-split and crossing-interrupted bores recombined), with axis,
+# opening location, diameter, depth, and bottom (through/flat/drill_point).
+# make_drawing()/build_drawing() already consume it: grouped callouts
+# ("4× ⌀10 THRU"), bolt-circle/array patterns, centre marks, location dims,
+# and automatic sections. Reach for the records directly only when annotating
+# a hand-built sheet:
 from build123d import *
-from build123d_drafting import Leader
+from build123d_drafting import HoleCallout, Leader, find_holes
 
 plate = (Box(40, 40, 5)
          - Cylinder(2, 5).move(Location((-10, -10, 0)))
@@ -397,21 +402,23 @@ plate = (Box(40, 40, 5)
          - Cylinder(2, 5).move(Location((-10, 10, 0)))
          - Cylinder(2, 5).move(Location((10, 10, 0))))
 
-# Find all cylindrical (hole-wall) faces
-hole_faces = plate.faces().filter_by(GeomType.CYLINDER)
-print(f"found {len(hole_faces)} cylindrical faces")
-
 draft = Draft(font_size=2, decimal_precision=1)
-labels = []
-for face in hole_faces:
-    c = face.center()
-    dia = face.bounding_box().size.X          # ⌀ read from the hole wall
-    # Leader points at the hole; the shelf carries the callout clear of the part.
-    labels.append(Leader((c.X, c.Y, 0), (c.X + 10, c.Y + 10, 0),
-                         f"⌀{dia:g} THRU", draft))
+holes = find_holes(plate)
+print([(h.diameter, h.depth, h.bottom) for h in holes])
+
+# Identical holes share one counted callout hung on a leader (covers the
+# coverage lint via the callout's structured metadata) — count only the
+# holes that really match the spec, not the whole list
+h = holes[0]
+same = [x for x in holes if (x.diameter, x.depth, x.bottom) == (h.diameter, h.depth, h.bottom)]
+callout = HoleCallout(h.diameter, count=len(same), through=h.bottom == "through",
+                      draft=draft)
+ldr = Leader((h.location[0], h.location[1], 0),
+             (h.location[0] + 12, h.location[1] + 10, 0),
+             "", draft, callout=callout)
 
 visible, _ = plate.project_to_viewport((0, 0, 100), (0, 1, 0), (0, 0, 0))
-result = Compound(children=list(visible) + labels)
+result = Compound(children=list(visible) + [ldr])
 show(result, "hole_callouts_demo")""",
     ),
     Section(

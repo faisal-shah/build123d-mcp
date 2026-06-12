@@ -128,6 +128,11 @@ def _find_bosses(ws, tmp_path):
     assert "error" not in r and r["bosses"] == []
 
 
+def _find_hole_patterns(ws, tmp_path):
+    r = json.loads(ws.find_hole_patterns("a"))
+    assert "error" not in r and r["patterns"] == []
+
+
 def _align_check(ws, tmp_path):
     r = json.loads(ws.align_check("a", "b", mode="center"))
     assert "error" not in r and "delta" in r
@@ -226,6 +231,7 @@ SESSION_STATEFUL_TOOLS = {
     "align_check": _align_check,
     "find_holes": _find_holes,
     "find_bosses": _find_bosses,
+    "find_hole_patterns": _find_hole_patterns,
     "cross_sections": _cross_sections,
     "resolve": _resolve,
     "suggest_view_layout": _suggest_view_layout,

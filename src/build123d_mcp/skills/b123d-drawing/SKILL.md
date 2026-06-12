@@ -15,8 +15,8 @@ build123d component. Drawings export to a project `drawings/` output directory.
    for cases the builder cannot express (e.g. a true cut section). Documented at
    the end as a fallback.
 
-Requires `build123d-drafting-helpers >= 0.4.1` (for `make_drawing` /
-`build_drawing`).
+Requires `build123d-drafting-helpers >= 0.7.0` (automatic hole callouts,
+patterns, location dims, and section views).
 
 ---
 
@@ -58,20 +58,30 @@ svg, dxf = make_drawing(
 ```
 
 `make_drawing` chooses the scale + ISO page size, projects front/plan/side/iso
-views, adds overall and diameter dimensions, centrelines for rotational
-features, and a title block — then lints and writes both SVG and DXF. Pass an
-in-memory object directly (no STEP round-trip) or a STEP path.
+views, and annotates automatically — then lints and writes both SVG and DXF.
+Pass an in-memory object directly (no STEP round-trip) or a STEP path.
+
+As of helpers v0.7.0 the automatic annotation covers **prismatic parts in
+full**: every recognised hole gets a grouped callout ("4× ø10 THRU",
+counterbore/depth symbols), bolt circles get "EQ SP ON øD BC" callouts with a
+pitch-circle centreline, linear arrays get pitch dims, every hole gets a
+centre mark and baseline X/Y location dims from the min-X/Y datum corner, and
+blind/counterbored holes trigger an automatic SECTION A–A. Turned parts get
+OD/length dims, centrelines, and bore leaders. **Do not clear and re-place
+these annotations** — edit only what is wrong or missing.
 
 Then verify (Step 3). For most parts you are done here.
 
-What `make_drawing` does **not** do: spiral/freeform profile dimensions,
-cross-hole callouts that need a section, GD&T / datums, or non-standard layouts.
-If you need those, go to Step 2.
+What `make_drawing` does **not** do: functional datum selection, GD&T,
+tolerances by fit, thread callouts, spiral/freeform profile dimensions,
+cross-axis hole *location* dims, pattern callouts on turned flanges, and
+section hatching. If the lint reports `feature_not_dimensioned` /
+`feature_count_mismatch`, something was skipped for page-space reasons — add
+just that callout in Step 2.
 
-The automatic dimensions and centrelines assume a broadly rotationally
-symmetric part (shafts, flanges, turned parts). For prismatic parts — plates
-with hole patterns, pockets, slots — expect to clear `dwg.annotations`
-wholesale in Step 2 and place dimensions yourself.
+The default location datum is the part's minimum-X/Y corner; if the
+functional datum differs, re-anchor those dims in Step 2 rather than
+rebuilding the sheet.
 
 ---
 
