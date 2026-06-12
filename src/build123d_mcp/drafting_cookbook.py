@@ -407,9 +407,11 @@ holes = find_holes(plate)
 print([(h.diameter, h.depth, h.bottom) for h in holes])
 
 # Identical holes share one counted callout hung on a leader (covers the
-# coverage lint via the callout's structured metadata)
+# coverage lint via the callout's structured metadata) — count only the
+# holes that really match the spec, not the whole list
 h = holes[0]
-callout = HoleCallout(h.diameter, count=len(holes), through=h.bottom == "through",
+same = [x for x in holes if (x.diameter, x.depth, x.bottom) == (h.diameter, h.depth, h.bottom)]
+callout = HoleCallout(h.diameter, count=len(same), through=h.bottom == "through",
                       draft=draft)
 ldr = Leader((h.location[0], h.location[1], 0),
              (h.location[0] + 12, h.location[1] + 10, 0),
