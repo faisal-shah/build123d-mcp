@@ -23,7 +23,7 @@ When using an AI to write build123d scripts, the AI writes blind — it cannot s
 - `clearance` — minimum distance (mm) between two named shapes
 - `cross_sections` — cross-sectional areas at evenly spaced planes along X/Y/Z; useful for detecting voids and wall-thickness variation
 - `resolve` — evaluate a selector expression (e.g. `.faces().filter_by(Axis.Z).last()`) against a named object and return a geometry descriptor
-- `find_holes` / `find_bosses` — feature recognition: coaxial drill + counterbore + spotface stacks as one hole record (axis, location, diameter, depth, bottom: through/flat/drill-point), external bosses with height
+- `find_holes` / `find_bosses` — feature recognition: coaxial drill + counterbore + spotface stacks as one hole record (axis, location, diameter, depth, bottom: through/flat/drill_point/unknown), external bosses with height
 - `analyze_printability` — BREP-exact FDM printability analysis: overhangs, thin walls, minimum features, bed fit, tip-over risk
 - `session_state` — full JSON snapshot of active shapes, named objects, snapshot names, and Python namespace variables
 - `last_error` — details of the last failed `execute()`: type, message, line number, and code excerpt

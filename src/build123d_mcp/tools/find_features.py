@@ -11,11 +11,18 @@ from dataclasses import asdict
 from build123d_mcp.tools.measure import _resolve_shape
 
 
+def _round(value):
+    if isinstance(value, float):
+        return round(value, 4)
+    if isinstance(value, tuple):
+        return [_round(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _round(v) for k, v in value.items()}
+    return value
+
+
 def _record(feature) -> dict:
-    rec = asdict(feature)
-    for key in ("axis", "location"):
-        rec[key] = [round(c, 4) for c in rec[key]]
-    return rec
+    return {k: _round(v) for k, v in asdict(feature).items()}
 
 
 def find_holes(session, object_name: str = "") -> str:
