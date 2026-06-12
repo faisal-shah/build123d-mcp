@@ -37,6 +37,31 @@ def find_holes(session, object_name: str = "") -> str:
     return json.dumps({"count": len(holes), "holes": holes})
 
 
+def find_hole_patterns(session, object_name: str = "") -> str:
+    """Recognise bolt-circle / linear-array hole patterns on a session object."""
+    from build123d_drafting import BoltCircle
+    from build123d_drafting import find_hole_patterns as _find_patterns
+    from build123d_drafting import find_holes as _find_holes
+
+    try:
+        shape = _resolve_shape(session, object_name)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
+    patterns = []
+    for p in _find_patterns(_find_holes(shape)):
+        rec = {"holes": [_record(h) for h in p.holes]}
+        if isinstance(p, BoltCircle):
+            rec["type"] = "bolt_circle"
+            rec["center"] = [round(c, 4) for c in p.center]
+            rec["diameter"] = p.diameter
+        else:
+            rec["type"] = "linear_array"
+            rec["pitch"] = p.pitch
+            rec["direction"] = [round(c, 4) for c in p.direction]
+        patterns.append(rec)
+    return json.dumps({"count": len(patterns), "patterns": patterns})
+
+
 def find_bosses(session, object_name: str = "") -> str:
     """Recognise external cylindrical bosses on a named session object."""
     from build123d_drafting import find_bosses as _find_bosses

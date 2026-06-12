@@ -10,7 +10,7 @@ import json
 import pytest
 
 from build123d_mcp.session import Session
-from build123d_mcp.tools.find_features import find_bosses, find_holes
+from build123d_mcp.tools.find_features import find_bosses, find_hole_patterns, find_holes
 
 
 @pytest.fixture
@@ -63,6 +63,28 @@ def test_plain_box_has_no_features(session):
     session.execute("show(Box(10, 10, 10), 'box')")
     assert json.loads(find_holes(session, "box")) == {"count": 0, "holes": []}
     assert json.loads(find_bosses(session, "box")) == {"count": 0, "bosses": []}
+
+
+def test_find_hole_patterns_bolt_circle(session):
+    session.execute(
+        "import math\n"
+        "p = Box(100, 100, 10)\n"
+        "for i in range(6):\n"
+        "    a = math.radians(60 * i)\n"
+        "    p = p - Pos(30 * math.cos(a), 30 * math.sin(a), 0) * Cylinder(4, 10)\n"
+        "show(p, 'bc')"
+    )
+    r = json.loads(find_hole_patterns(session, "bc"))
+    assert r["count"] == 1
+    (pat,) = r["patterns"]
+    assert pat["type"] == "bolt_circle"
+    assert pat["diameter"] == pytest.approx(60.0)
+    assert len(pat["holes"]) == 6
+
+
+def test_find_hole_patterns_none(session):
+    session.execute("show(Box(20, 20, 5) - Cylinder(2, 5), 'one')")
+    assert json.loads(find_hole_patterns(session, "one")) == {"count": 0, "patterns": []}
 
 
 def test_unknown_object_is_a_json_error(session):

@@ -4,6 +4,15 @@
 
 ### Features
 
+- **Guidance refresh for build123d-drafting-helpers v0.7.0** (#264 follow-up):
+  the `b123d-drawing` skill and drafting cookbook no longer tell the agent to
+  clear prismatic auto-annotations and hand-place dimensions — `make_drawing`
+  now emits grouped hole callouts, bolt-circle/array patterns, centre marks,
+  baseline location dims, and automatic sections itself; the hole-table recipe
+  demonstrates `find_holes` instead of hand-rolled face scans. Dependency
+  floor raised to `build123d-drafting-helpers>=0.7.0`.
+- **`find_hole_patterns` tool** — bolt-circle / linear-array recognition over
+  the hole records (`{type, holes, center/diameter | pitch/direction}`).
 - **`find_holes` / `find_bosses` tools** — feature recognition on session objects via build123d-drafting-helpers ≥ 0.6.0 (#264). Coaxial internal cylinders are grouped into one record per drilled hole (drill + counterbore + spotface; keyway-split and crossing-hole-interrupted bores count once) with axis, opening location, diameter, depth, and bottom classification (`through` / `flat` / `drill_point` / `unknown`); `find_bosses` reports external segments with height. Replaces the hand-rolled `BRepAdaptor_Surface` hole detection that dominated the NIST CTC-02 benchmark session.
 - **`save_json(name, obj)` sandbox helper** — the sanctioned structured-output channel for `execute()` (#259). JSON-serializes analysis data (face inventories, hole tables, section data) to a per-process server scratch dir with a validated stem and 10 MB cap, returning the path for the caller to read back. `open()`/`os` remain blocked.
 - **`build123d://drafting-api` MCP resource** — API reference for build123d-drafting-helpers generated from the installed library with `inspect`, so signatures never drift across releases (#260). Pointed to from the drawing skill.

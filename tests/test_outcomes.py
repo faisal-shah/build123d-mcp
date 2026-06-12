@@ -633,6 +633,7 @@ def test_mcp_lists_all_tools():
         "align_check",
         "find_holes",
         "find_bosses",
+        "find_hole_patterns",
         "resolve",
         "script",
         "install_skill",

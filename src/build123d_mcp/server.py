@@ -363,6 +363,12 @@ def find_holes(object_name: str = "") -> str:
 
 
 @mcp.tool()
+def find_hole_patterns(object_name: str = "") -> str:
+    """Recognise hole patterns on a session object (defaults to current shape): ≥3 identical-spec holes equally spaced on a circle → bolt_circle (center, diameter/BCD), collinear at constant pitch → linear_array (pitch, direction). Returns JSON: {count, patterns: [{type, holes: [HoleFeature records], center/diameter | pitch/direction}]}. Each hole belongs to at most one pattern; make_drawing already annotates these automatically."""
+    return _session.find_hole_patterns(object_name)
+
+
+@mcp.tool()
 def find_bosses(object_name: str = "") -> str:
     """Recognise external cylindrical bosses on a session object (defaults to current shape), including a turned part's OD — filter on diameter against the part envelope for local bosses only. Returns JSON: {count, bosses: [{axis (base toward free end), location (free-end point), diameter, height}]}."""
     return _session.find_bosses(object_name)
