@@ -121,7 +121,7 @@ Part library file format (Python, any .py file under --library path):
         "--exec-timeout",
         metavar="SECONDS",
         type=int,
-        default=int(os.environ.get("BUILD123D_EXEC_TIMEOUT", "120")),
+        default=int(os.environ.get("BUILD123D_EXEC_TIMEOUT") or "120"),
         help="Execution time limit in seconds for user code (default: 120). "
         "Overrides BUILD123D_EXEC_TIMEOUT env var.",
     )
@@ -151,14 +151,44 @@ Part library file format (Python, any .py file under --library path):
     parser.add_argument(
         "--port",
         type=int,
-        default=int(os.environ.get("BUILD123D_PORT", "8000")),
+        default=int(os.environ.get("BUILD123D_PORT") or "8000"),
         help="Port to bind when --transport http (default: 8000). "
         "Overrides BUILD123D_PORT env var.",
+    )
+    parser.add_argument(
+        "--memory-limit-mb",
+        metavar="MB",
+        type=int,
+        default=int(os.environ.get("BUILD123D_MEMORY_LIMIT_MB") or "0") or None,
+        help="Cap the worker's heap/data segment in MB via RLIMIT_DATA (POSIX only; "
+        "ignored on Windows). Note: mmap-backed allocations (large OCC buffers) are "
+        "not covered — use container cgroup limits for comprehensive memory control. "
+        "Overrides BUILD123D_MEMORY_LIMIT_MB env var.",
+    )
+    parser.add_argument(
+        "--cpu-limit-s",
+        metavar="SECONDS",
+        type=int,
+        default=int(os.environ.get("BUILD123D_CPU_LIMIT_S") or "0") or None,
+        help="Cap total CPU time for the worker subprocess in seconds via RLIMIT_CPU "
+        "(POSIX only; ignored on Windows). The worker receives SIGXCPU when the soft "
+        "limit is reached and is killed at the hard limit. "
+        "Overrides BUILD123D_CPU_LIMIT_S env var.",
     )
     args = parser.parse_args()
 
     if args.library and not os.path.isdir(args.library):
         parser.error(f"Library path is not a directory: {args.library}")
+
+    if args.transport not in ("stdio", "http"):
+        parser.error(
+            f"invalid BUILD123D_TRANSPORT value '{args.transport}'; must be 'stdio' or 'http'"
+        )
+
+    if args.memory_limit_mb is not None and args.memory_limit_mb <= 0:
+        parser.error(f"--memory-limit-mb must be a positive integer, got {args.memory_limit_mb}")
+    if args.cpu_limit_s is not None and args.cpu_limit_s <= 0:
+        parser.error(f"--cpu-limit-s must be a positive integer, got {args.cpu_limit_s}")
 
     extra_imports = tuple(m.strip() for m in args.allow_imports.split(",") if m.strip())
 
@@ -171,18 +201,34 @@ Part library file format (Python, any .py file under --library path):
             _sec.EXTRA_ALLOWED_IMPORTS.update(extra_imports)
 
     session_cls = InProcessSession if args.in_process else WorkerSession
-    server.configure(
-        session_cls(
-            library_path=args.library,
-            allow_all_imports=args.allow_all_imports,
-            extra_allowed_imports=extra_imports,
-            exec_timeout=args.exec_timeout,
+    session_kwargs: dict = {
+        "library_path": args.library,
+        "allow_all_imports": args.allow_all_imports,
+        "extra_allowed_imports": extra_imports,
+        "exec_timeout": args.exec_timeout,
+    }
+    if not args.in_process:
+        if args.memory_limit_mb is not None:
+            session_kwargs["memory_limit_mb"] = args.memory_limit_mb
+        if args.cpu_limit_s is not None:
+            session_kwargs["cpu_limit_s"] = args.cpu_limit_s
+    elif args.memory_limit_mb is not None or args.cpu_limit_s is not None:
+        print(
+            "WARNING: --memory-limit-mb and --cpu-limit-s are ignored in --in-process mode "
+            "(no worker subprocess to limit).",
+            file=sys.stderr,
         )
-    )
+    server.configure(session_cls(**session_kwargs))
 
     if args.transport == "http":
         import uvicorn
 
+        print(
+            "WARNING: HTTP transport runs a single shared CAD session. "
+            "Concurrent clients will share the same build123d namespace — "
+            "suitable for single-user deployments only.",
+            file=sys.stderr,
+        )
         uvicorn.run(server.http_app(), host=args.host, port=args.port)
     else:
         server.mcp.run()
