@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.3.51 — 2026-06-19
+
+### Features
+
+- **New `validate()` tool — pre-export validity gate.** Reports a `PASS`/`FAIL` verdict plus JSON (`passes_gate`, `n_solids`, `volume`, `watertight_manifold`, `open_edges`, `nonmanifold_edges`, `mesh_nonmanifold_edges`, `brep_valid`, `reasons`, `warnings`) for whether a shape would pass a CAD validity gate. CAD scorers (e.g. CADGenBench) zero any submission that isn't a well-formed, watertight, manifold solid regardless of how close the geometry is, and `measure()` only reports counts/volume — so an agent could build a non-manifold or open solid, "verify" it with `measure()`, and ship a zero with full confidence. `validate()` closes that gap with actionable `reasons` (leftover 2D sketch, open shell, un-fused compound, self-touching faces). The modeling skill now mandates it before export, and `export()` re-runs the gate on 3D output and warns when the written STEP/STL would be rejected. (#276)
+
+### Fixed
+
+- **Validity gate no longer relies on build123d's `is_manifold`**, which false-negates on closed solids imported from STEP (verified on NIST CAD models — a single closed shell with zero open edges still reported `is_manifold=False`). Watertightness/manifoldness is now judged by the edge→face map (every non-degenerate edge shared by exactly two faces) — a gate that false-FAILed valid imported solids would train agents to ignore it. (#277)
+- **Mesh-level non-manifold detection** catches self-touching / coincident-face solids that are watertight and BRepCheck-valid but whose tessellated mesh has an edge shared by more than two triangles — the dominant invalid-but-watertight failure mode. Welds per-face tessellation samples first; verified zero false positives on curved and real CAD geometry. (#278)
+
+## v0.3.50 — 2026-06-14
+
+### Features
+
+- **HTTP / ASGI streamable-http transport.** `--transport http` (with `--host` / `--port`, and `BUILD123D_TRANSPORT` / `BUILD123D_HOST` / `BUILD123D_PORT` env overrides) serves the MCP server over HTTP; `http_app()` exposes the FastMCP ASGI app for embedding in an external ASGI application. Per-request session isolation via a `contextvars`-based resolver lets a host run a separate `WorkerSession` per `(user, project)`. Default stdio behaviour is unchanged. (#268, #272)
+- **Per-worker resource limits.** `--memory-limit-mb` (`RLIMIT_DATA`) and `--cpu-limit-s` (`RLIMIT_CPU`) bound a worker's memory and CPU (POSIX; no-op with a warning on macOS/Windows). Plus a configurable per-tenant filesystem root for multi-tenant hosting. (#268, #273)
+
+### Dependencies
+
+- `mcp>=1.9` (for `streamable_http_app()`); `uvicorn` added as the `[http]` optional extra. `build123d-drafting-helpers>=0.10.0`. `draftwright` added to the sandbox import allowlist (bring-your-own AGPL drawing engine). (#270, #271)
+
 ## v0.3.49 — 2026-06-12
 
 ### Features
