@@ -46,6 +46,13 @@ def _gate_report(shape) -> dict:
         brep_valid = bool(BRepCheck_Analyzer(shape.wrapped).IsValid())
     except Exception:
         brep_valid = False
+    # Mesh-level non-manifold check, mirroring how a CAD scorer validates
+    # (tessellate → check the mesh is manifold). Catches self-touching /
+    # coincident-face defects that are valid B-reps the edge-face map above does
+    # not see — the dominant invalid-but-watertight failure mode observed on
+    # CADGenBench (a single solid whose mesh has an edge shared by 4 triangles).
+    mesh_nm_edges, mesh_ok = _mesh_defects(shape)
+    mesh_nonmanifold = mesh_ok and mesh_nm_edges > 0
 
     reasons: list[str] = []
     if not brep_valid:
@@ -56,6 +63,12 @@ def _gate_report(shape) -> dict:
         reasons.append(f"{open_edges} open edge(s) — not watertight (open shell or unsewn faces)")
     if nonmanifold_edges:
         reasons.append(f"{nonmanifold_edges} non-manifold edge(s) — edges shared by 3+ faces")
+    if mesh_nm_edges:
+        reasons.append(
+            f"{mesh_nm_edges} mesh non-manifold edge(s) — faces meet >2-ways "
+            "(self-touch / coincident faces); a CAD scorer rejects this even though "
+            "it looks watertight"
+        )
     if n_solids == 0 and not open_edges and not nonmanifold_edges:
         reasons.append("closed surface but no solid body — wrap the faces in Solid() before export")
     elif n_solids == 0:
@@ -73,7 +86,13 @@ def _gate_report(shape) -> dict:
             "solid; fuse them (Part() + ... or a.fuse(b)) or the topology score suffers"
         )
 
-    passes = brep_valid and watertight_manifold and volume > _EPS and n_solids >= 1
+    passes = (
+        brep_valid
+        and watertight_manifold
+        and not mesh_nonmanifold
+        and volume > _EPS
+        and n_solids >= 1
+    )
     return {
         "passes_gate": passes,
         "n_solids": n_solids,
@@ -81,6 +100,7 @@ def _gate_report(shape) -> dict:
         "watertight_manifold": watertight_manifold,
         "open_edges": open_edges,
         "nonmanifold_edges": nonmanifold_edges,
+        "mesh_nonmanifold_edges": mesh_nm_edges,
         "brep_valid": brep_valid,
         "warnings": warnings,
         "reasons": reasons,
@@ -117,6 +137,56 @@ def _edge_defects(shape) -> tuple[int, int, bool]:
         return open_edges, nonmanifold_edges, True
     except Exception:
         return 0, 0, False
+
+
+def _mesh_defects(shape) -> tuple[int, bool]:
+    """Tessellate and count mesh-level non-manifold edges (shared by >2 triangles).
+
+    Mirrors how a CAD scorer validates (B-rep → mesh → manifold check), catching
+    self-touching / coincident-face defects that pass BRepCheck and the edge-face
+    map (a single watertight solid whose mesh has an edge shared by 4 triangles).
+    OCP meshes each face independently, so coincident vertices are welded by
+    rounded coordinate before counting; verified to give zero false positives on
+    curved and real CAD geometry (incl. a 199k-edge NIST model). Returns
+    (nonmanifold_edges, ok).
+
+    Deliberately edge-only: a tessellation-based non-manifold *vertex* (pinch
+    point) test is too easily tripped into false positives by sliver/degenerate
+    triangles and per-face sampling on curved surfaces, and a gate that rejects
+    valid geometry is worse than one that misses a rare case. The >2-incidence
+    edge count is robust because per-face sampling noise produces 1-incidence
+    edges, never >2.
+    """
+    try:
+        import math
+        from collections import Counter
+
+        bb = shape.bounding_box()
+        diag = math.dist((bb.min.X, bb.min.Y, bb.min.Z), (bb.max.X, bb.max.Y, bb.max.Z))
+        if diag <= 0:
+            return 0, False
+        verts, tris = shape.tessellate(max(diag * 1e-3, 1e-4))
+        if not verts or not tris:
+            return 0, False
+
+        q = diag * 1e-5  # weld tolerance: merge per-face samples on shared edges
+        remap: list[int] = []
+        keys: dict = {}
+        for v in verts:
+            k = (round(v.X / q), round(v.Y / q), round(v.Z / q))
+            remap.append(keys.setdefault(k, len(keys)))
+
+        edge_count: Counter = Counter()
+        for t in tris:
+            a, b, c = remap[t[0]], remap[t[1]], remap[t[2]]
+            if len({a, b, c}) < 3:
+                continue  # degenerate triangle after welding
+            for e in ((a, b), (b, c), (a, c)):
+                edge_count[tuple(sorted(e))] += 1
+
+        return sum(1 for n in edge_count.values() if n > 2), True
+    except Exception:
+        return 0, False
 
 
 def _resolve_shape(session, object_name: str):
