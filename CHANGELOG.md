@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.3.52 — 2026-06-21
+
+### Fixed
+
+- **Validity gate ignores free wire edges (PMI annotation curves).** Edges with no incident face — leader/dimension curves carried by an imported STEP, or stray construction geometry — were counted as open boundaries, false-FAILing clean watertight solids imported from PMI-annotated CAD. Only one-face edges are genuine open boundaries now. (#279)
+- **Accurate topology-stitch mesh non-manifold check at export.** The mesh check welded per-face tessellation samples by rounded coordinate; at that tolerance's rounding boundary it could both miss real non-manifold defects and false-flag valid solids (verified against a CAD-scorer corpus: 2 missed, 1 false-flagged). `export()` now uses a tolerance-free check that stitches the per-face triangulations into one conformal mesh by topology (globally consistent winding, shared-edge node-index union-find, degenerate-edge BREP-vertex merge, opposite-winding flap cancellation), matching the scorer's gate exactly. It is triangle-count-budgeted with fallback to the fast check, so interactive `validate()` stays fast; a `mesh_check` field records which ran. (#281, #282)
+
 ## v0.3.51 — 2026-06-19
 
 ### Features
