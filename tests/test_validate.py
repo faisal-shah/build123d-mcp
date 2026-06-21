@@ -81,6 +81,65 @@ def test_mesh_nonmanifold_edge_fails(session):
     assert any("mesh non-manifold edge" in r for r in report["reasons"])
 
 
+def test_mesh_exact_curved_no_false_positive(session):
+    """The accurate topology-stitch mesh check (used at export) must not
+    false-positive on clean curved geometry — it is tolerance-free, so unlike the
+    fast coordinate weld it cannot invent a non-manifold edge from rounding."""
+    execute_code(session, "show(Cylinder(8, 20) - Cylinder(3, 20), 'tube')")
+    report = _gate_report(session.objects["tube"], exact=True)
+    assert report["mesh_nonmanifold_edges"] == 0
+    assert report["passes_gate"] is True
+
+
+def test_mesh_exact_nonmanifold_edge_fails(session):
+    """The accurate mesh check detects the edge-touch non-manifold: the fused
+    shared edge stitches the four incident faces into a mesh edge shared by >2
+    triangles."""
+    execute_code(
+        session,
+        "show(Box(10, 10, 10) + Pos(10, 10, 0) * Box(10, 10, 10), 'edge_touch')",
+    )
+    report = _gate_report(session.objects["edge_touch"], exact=True)
+    assert report["mesh_nonmanifold_edges"] > 0
+    assert report["passes_gate"] is False
+
+
+def test_mesh_exact_passes_disjoint_touching_bodies():
+    """Two valid solids that merely touch (coincident face) are two manifold
+    bodies, not a non-manifold solid. The topology-stitch exact check correctly
+    passes them — it stitches only topologically-shared edges — where the fast
+    coordinate weld over-flags (it merges the distinct bodies by proximity).
+    Regression guarding the exact check against reverting to a coordinate weld."""
+    from build123d import Box, Compound, Pos
+
+    from build123d_mcp.tools.validate import _mesh_defects, _mesh_defects_exact
+
+    two = Compound([Box(10, 10, 10), Pos(0, 0, 10) * Box(10, 10, 10)])
+    assert _mesh_defects(two)[0] > 0  # fast weld over-flags two touching bodies
+    assert _mesh_defects_exact(two)[0] == 0  # exact (topology) is correct
+
+
+def test_validate_small_part_uses_exact_check(session):
+    """A small part is cheap to stitch, so interactive validate() runs the exact
+    mesh check (not just the fast fallback) — recorded in mesh_check."""
+    execute_code(session, "show(Box(10, 10, 10), 'b')")
+    report = _gate_report(session.objects["b"])  # default inline path
+    assert report["mesh_check"] == "exact"
+    assert report["passes_gate"] is True
+
+
+def test_mesh_check_falls_back_to_fast_over_budget(session, monkeypatch):
+    """Above the triangle budget the gate falls back to the fast check instead of
+    running (or hanging on) the slow stitch — the perf guard."""
+    import build123d_mcp.tools.validate as v
+
+    monkeypatch.setattr(v, "_EXACT_INLINE_MAX_TRIS", 1)
+    execute_code(session, "show(Box(10, 10, 10), 'b')")
+    report = _gate_report(session.objects["b"])
+    assert report["mesh_check"] == "fast"
+    assert report["passes_gate"] is True
+
+
 def test_2d_sketch_fails(session):
     execute_code(session, "show(Rectangle(5, 5), 'sk')")
     out = validate(session, "sk")
@@ -171,7 +230,10 @@ def test_export_3d_warns_when_gate_fails(session, tmp_path, monkeypatch):
     monkeypatch.setattr(
         v,
         "_gate_report",
-        lambda shape: {"passes_gate": False, "reasons": ["injected non-manifold solid"]},
+        lambda shape, exact=False: {
+            "passes_gate": False,
+            "reasons": ["injected non-manifold solid"],
+        },
     )
     out = export_file(session, "out", "step", object_name="part")
     assert os.path.exists("out.step")  # the file is still written
