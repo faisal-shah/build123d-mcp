@@ -255,9 +255,10 @@ def test_export_3d_warns_when_gate_fails(session, tmp_path, monkeypatch):
     monkeypatch.setattr(
         v,
         "_gate_report",
-        lambda shape, exact=False: {
+        lambda shape, exact=False, mesh_override=None: {
             "passes_gate": False,
             "reasons": ["injected non-manifold solid"],
+            "mesh_check": "exact-subprocess",
         },
     )
     out = export_file(session, "out", "step", object_name="part")
@@ -347,3 +348,29 @@ def test_edge_incidence_nonmanifold_edge():
     mf = np.array([[0, 1, 2], [0, 1, 3], [0, 1, 4]], dtype=np.int64)
     counts = _edge_incidence_counts(mf, 5)
     assert int((counts > 2).sum()) > 0
+
+
+# --- out-of-process mesh gate (export retry for parts too large to mesh in-budget) ---
+
+
+def test_mesh_gate_subprocess_valid_step(tmp_path):
+    from build123d import Box, export_step
+
+    from build123d_mcp.tools.validate import _run_mesh_gate_subprocess
+
+    p = tmp_path / "box.step"
+    export_step(Box(10, 10, 10), str(p))
+    # A clean solid: 0 non-manifold, 0 open, 0 untriangulated, ok=True.
+    assert _run_mesh_gate_subprocess(str(p), timeout=120) == (0, 0, 0, True)
+
+
+def test_mesh_gate_subprocess_timeout_returns_none(tmp_path):
+    from build123d import Box, export_step
+
+    from build123d_mcp.tools.validate import _run_mesh_gate_subprocess
+
+    p = tmp_path / "box.step"
+    export_step(Box(10, 10, 10), str(p))
+    # A hard timeout kills the subprocess and returns None (undetermined),
+    # so the caller keeps its safe in-process verdict — never invents one.
+    assert _run_mesh_gate_subprocess(str(p), timeout=0.001) is None

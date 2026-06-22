@@ -1,5 +1,6 @@
 import copy
 import struct
+import time
 
 from build123d_mcp.tools._paths import safe_output_path
 
@@ -105,6 +106,7 @@ def _write_one(shape, abs_path: str, fmt: str) -> None:
 
 
 def export_file(session, filename: str, format: str = "step", object_name: str = "") -> str:
+    _t0 = time.monotonic()  # op entry — used to bound the out-of-process gate
     shape = _resolve_shape(session, object_name)
 
     formats = [f.strip().lower() for f in format.split(",") if f.strip()]
@@ -171,7 +173,46 @@ def export_file(session, filename: str, format: str = "step", object_name: str =
                 "\n⚠ VALIDITY GATE FAIL — the written STEP could not be re-imported; "
                 "a CAD scorer would reject this file (score zero). Fix the solid and re-export."
             )
+        elif step_path is not None:
+            # Run the mesh check OUT OF PROCESS for STEP exports. The mesh stitch is
+            # dominated by OCC BRepMesh — an un-interruptible native call no
+            # in-process budget can stop — so running it in-process risks blocking
+            # the worker past the op-timeout (which kills the session). Bound it by
+            # the time LEFT in this op's budget (NOT the full budget — the re-import
+            # and B-rep checks already spent some), so the subprocess is always
+            # killed before the parent kills the worker. B-rep checks run in-process
+            # (cheap). On timeout the mesh check is skipped (B-rep only) + a warning.
+            from build123d_mcp.tools.validate import _run_mesh_gate_subprocess
+
+            # Margin covers the B-rep checks that still run in-process after this
+            # (fast — BRepCheck, not meshing) + subprocess teardown + parent poll
+            # granularity, so worker total stays under the parent op-budget.
+            _budget = max(60, getattr(session, "exec_timeout", 120))
+            _remaining = _budget - (time.monotonic() - _t0) - 15
+            _mesh = (
+                _run_mesh_gate_subprocess(step_path, timeout=_remaining)
+                if _remaining >= 10
+                else None
+            )
+            report = _gate_report(
+                gate_shape,
+                exact=True,
+                mesh_override=_mesh if _mesh is not None else (0, 0, 0, False),
+            )
+            if not report["passes_gate"]:
+                suffix += (
+                    "\n⚠ VALIDITY GATE FAIL — a CAD scorer would reject this file (score zero): "
+                    + "; ".join(report["reasons"])
+                    + ". Fix the solid and re-export (run validate() for detail)."
+                )
+            elif report.get("mesh_check") == "skipped":
+                suffix += (
+                    "\n⚠ NOTE — the part was too large to mesh-check within the time "
+                    "budget, so only B-rep checks ran; a mesh-level defect (open/"
+                    "non-manifold) would not be caught here."
+                )
         else:
+            # STL-only export (no STEP path to hand the subprocess): gate in-process.
             report = _gate_report(gate_shape, exact=True)
             if not report["passes_gate"]:
                 suffix += (
