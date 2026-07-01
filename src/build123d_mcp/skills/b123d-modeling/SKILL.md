@@ -56,11 +56,27 @@ views disagreeing — ask the user which value to use. Do not guess silently.
 
 - One feature (or one boolean) per `execute()` call. Small steps are easy to
   debug; a 60-line block that fails tells you nothing about which line broke.
-- Build from the parameters, never from magic numbers — the part must
-  regenerate when a dimension changes.
 - Register the part under a stable name as soon as it exists:
   `show(part, "part")`. `show()` prints volume and face count immediately,
   confirming the shape is non-empty.
+
+**Author for editability — a design to edit, not a shape to render.** A
+syntactically valid script that hard-codes every number is a *shape*, not a
+*design*: no one can change the hole spacing without rebuilding from scratch.
+Follow the design-state conventions (Arko-T §4.3) so an edit is a one-number
+change:
+
+- **Named parameter block at the top, with units** — `plate_thickness = 5.0  # mm`
+  — never inline magic constants.
+- **Consistent construction order** — base sketch/solid → secondary features
+  (holes, ribs, pockets) → finishing (fillets, chamfers, shell).
+- **Canonical feature idioms** so a feature name maps to the obvious construction
+  pattern; reuse the same idiom for the same feature.
+- **Derive coordinates from parameters** (expressions / references / selectors),
+  not hand-computed magic positions — so moving one datum moves everything bound
+  to it. See `build123d://quickref` Pattern 3 for a worked example.
+
+Finish by running `design_audit()` (Step 6) to prove the parameters are robust.
 
 ## Step 3 — Verify numerically, then visually
 
@@ -147,7 +163,11 @@ The ceiling can be raised with `--exec-timeout N` or `BUILD123D_EXEC_TIMEOUT=N`
    `scripts/<part>.py`: the parameter block, the build steps, and the export
    call. Follow the project's existing script layout, and pick a non-colliding
    name if one exists. The part should live in version control as code, not
-   only as a STEP artifact.
+   only as a STEP artifact. Keep dimensions in a named parameter block at the
+   top (`plate_thickness = 5.0  # mm`), not inline literals — then
+   `design_audit()` can surface those parameters and perturb each ±10% to flag
+   *brittle* ones (a nudge that fails the validity gate), so you ship an
+   editable design, not just a valid shape.
 5. If the part will be FDM printed, run `analyze_printability("part")` and
    report overhangs / thin walls / bed-fit findings.
 6. For an engineering drawing of the finished part, switch to the b123d-drawing

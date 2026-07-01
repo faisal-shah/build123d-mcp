@@ -29,6 +29,7 @@ Follow this order — deterministic checks before visual:
 1. **After every `execute()`** — call `measure()`. Check `topology.faces` changed as expected after a boolean, and `volume` is plausible. If not, diagnose before proceeding.
 2. **After assembly positioning** — call `clearance()` between mating parts. Status should be `touching` or `apart`, not `interpenetrating`.
 3. **Only after (1) and (2) pass** — call `render_view()`.
+4. **Before finishing a parametric part** — call `design_audit()`. It surfaces the program's named numeric parameters and nudges each ±10%, re-running the validity gate, so you ship an *editable design* and not just a valid *shape*. A parameter flagged `brittle` (a small change that collapses the solid or fails the gate) is a design weakness worth fixing; if it reports "no named parameters", hoist your key dimensions into a top-of-program parameter block and re-run.
 
 **When to render:** assembling parts for the first time; after fillet/shell/loft; when the user asks to see something specific. Do not render after a simple boolean that `measure()` already confirmed.
 
@@ -54,6 +55,8 @@ with BuildPart() as bp:
     Cylinder(radius=3, height=30, mode=Mode.SUBTRACT)
 result = bp.part
 ```
+
+**Author for editability — a design to edit, not a shape to render.** Put named parameters *with units* at the top and build from them, never from inline magic constants; keep a consistent construction order (base → secondary features → finishing) and derive coordinates from parameters rather than hand-computed positions. This produces an editable *design*, not just a valid *shape* — and lets `design_audit()` (see the validation protocol) check the parameters are robust. The `build123d://quickref` "design-state authoring" pattern is a worked example.
 
 ## Multi-object assemblies
 

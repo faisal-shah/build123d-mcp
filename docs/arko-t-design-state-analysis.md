@@ -5,7 +5,7 @@ arXiv:2606.30429v1, 29 Jun 2026. Arko-T is a 4B-parameter model that maps a natu
 prompt to an executable **build123d** program. We are not that model — but the paper's framing of
 *what a good CAD generation is* maps directly onto gaps in this server.
 
-This note records the analysis and points to the tracking issue for the actionable item.
+This note records the analysis. Its headline recommendation shipped as the `design_audit()` tool (#330).
 
 ---
 
@@ -53,7 +53,13 @@ for.
 
 ## Recommendations, ranked
 
-### 1. Design-state audit / parametric-robustness tool — *highest value, genuinely missing*
+### 1. Design-state audit / parametric-robustness tool — *implemented as `design_audit()` (#330)*
+
+> **Status: shipped.** This recommendation is now the `design_audit()` tool — it surfaces the
+> program's top-level numeric parameters and perturbs each ±ε, re-running the validity gate to flag
+> *brittle* parameters (a small edit that collapses the solid). The rebuild+gate loop runs in a
+> hard-bounded subprocess (see [ADR 0002](adr/0002-worker-subprocess-crash-containment.md)). The rest
+> of this section is the original design rationale.
 
 This is the paper's own headline future-work item (§6):
 
@@ -73,9 +79,9 @@ library parts, not the live session program). A new tool would:
   luck.
 
 This converts "valid shape" into "valid, editable design" reusing machinery that already exists.
-It is the single change most faithful to the paper. **Tracked separately (see below).**
+It is the single change most faithful to the paper. **Delivered in #330.**
 
-### 2. Push design-state code structure in the guidance — *low cost, high leverage*
+### 2. Push design-state code structure in the guidance — *delivered alongside #330*
 
 §4.3 ("Design-State Code Normalization") is a recipe adoptable almost verbatim for the guidance the
 server gives the *calling* model:
@@ -86,12 +92,12 @@ server gives the *calling* model:
 - **Consistent construction order** (sketch → extrude → secondary features → finishing).
 - **Explicit constraints / references** rather than implicitly computed coordinates.
 
-Today `quickref.py` teaches the *opposite* by example — nearly every snippet is `Box(20, 10, 5)`
-with inline literals. A model imitating the quickref faithfully produces shapes, not editable
-designs. `default_prompt.md` has a strong *validation* protocol but nothing on *parametric authoring
-style*. Adding a short "Author for editability" section to both, plus one parametric exemplar in the
-quickref, is cheap and directly targets the thesis. `validate_code.py` could additionally emit an
-advisory when a program has many inline numeric literals and no parameter block.
+> **Status: shipped (guidance).** An "Author for editability" section is now in the b123d-modeling
+> skill (Step 2) and in `default_prompt.md`, and `quickref.py` gained a runnable **Pattern 3:
+> design-state authoring** exemplar (named parameter block + units, base → secondary → finishing
+> order). Previously the quickref taught the *opposite* — nearly every snippet was `Box(20, 10, 5)`
+> with inline literals. Still open as an optional extra: a `validate_code.py` advisory when a program
+> has many inline numeric literals and no parameter block.
 
 ### 3. Tie feature detection to *intent* (feature-realization check)
 
@@ -138,7 +144,10 @@ more than a code change.
 
 ## Bottom line
 
-The server has nailed the executability half of the paper and has a blind spot on the design-state
-half — the exact half the paper exists to argue for. The highest-value, most paper-faithful move is
-**#1, a design-state / parametric-robustness audit tool**, built on the `_gate_report` machinery
-already in `validate.py`.
+The server had nailed the executability half of the paper and a blind spot on the design-state
+half — the exact half the paper exists to argue for. The highest-value, most paper-faithful move,
+**#1, a design-state / parametric-robustness audit tool** built on the `_gate_report` machinery in
+`validate.py`, has now shipped as `design_audit()` (#330), and its companion #2 (design-state
+authoring guidance) shipped with it in the skill, `default_prompt.md`, and `quickref.py`.
+Recommendations #3–#5 (feature-realization check, failure-mode lint, oracle/self-improving loop)
+remain open — they are new features, not doc changes.
