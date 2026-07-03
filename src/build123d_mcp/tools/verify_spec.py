@@ -13,6 +13,7 @@ ignored): parameter robustness (design_audit), non-geometry targets.
 """
 
 import json
+import math
 
 from build123d_mcp.tools._paths import safe_output_path
 from build123d_mcp.tools.validate import _gate_report, _resolve_shape
@@ -712,6 +713,151 @@ def verify_spec(session, spec: str = "", spec_path: str = "", object_name: str =
                 "conforms": n_fail == 0 and checked > 0,
             },
             "note": note,
+        },
+        indent=2,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# suggest_spec — draft a starter design-intent spec from the current shape     #
+# --------------------------------------------------------------------------- #
+
+
+def _pct_band(x: float, dp: int = 2) -> list[float]:
+    """A ±2% band floored/ceiled to `dp` decimals so the actual value is always
+    bracketed — plain rounding can push a bound past x for sub-0.25 mm dimensions,
+    breaking the suggest→verify round-trip."""
+    scale = 10**dp
+    return [math.floor(x * 0.98 * scale) / scale, math.ceil(x * 1.02 * scale) / scale]
+
+
+def _round(x, n=3):
+    return round(x, n) if isinstance(x, (int, float)) else x
+
+
+def _suggest_features(session, object_name: str) -> list:
+    """Emit hole/hole_pattern/boss feature entries from the recognizers, de-duped
+    so a pattern's member holes aren't also counted as standalone holes."""
+    from collections import Counter
+
+    from build123d_mcp.tools.find_features import find_bosses, find_hole_patterns, find_holes
+
+    feats: list = []
+    pats = json.loads(find_hole_patterns(session, object_name)).get("patterns", [])
+    holes = json.loads(find_holes(session, object_name)).get("holes", [])
+    bosses = json.loads(find_bosses(session, object_name)).get("bosses", [])
+
+    pattern_dia_counts: Counter = Counter()
+    for p in pats:
+        members = p.get("holes", [])
+        dias = [h.get("diameter") for h in members if h.get("diameter") is not None]
+        dia = _round(dias[0]) if dias else None
+        entry: dict = {"kind": "hole_pattern", "pattern": p.get("type"), "holes": len(members)}
+        if p.get("type") == "bolt_circle" and p.get("diameter") is not None:
+            entry["bcd_mm"] = _round(p["diameter"])
+        if p.get("type") == "linear_array" and p.get("pitch") is not None:
+            entry["pitch_mm"] = _round(p["pitch"])
+        if dia is not None:
+            entry["diameter_mm"] = dia
+            pattern_dia_counts[dia] += len(members)
+        feats.append(entry)
+
+    # Standalone (non-pattern) holes, one entry per diameter. Group by verify_spec's
+    # OWN match tolerance (`_close`), not an exact key: verify counts every hole
+    # within tol of the entry's Ø, so two holes 0.08 mm apart would otherwise each
+    # claim count 1 while verify matches both → a self-failing spec.
+    hole_dia_counts: Counter = Counter(
+        _round(h["diameter"]) for h in holes if h.get("diameter") is not None
+    )
+    standalone: list[float] = []
+    for dia, cnt in hole_dia_counts.items():
+        standalone.extend([dia] * max(0, cnt - pattern_dia_counts.get(dia, 0)))
+
+    clusters: list[list] = []  # [representative_diameter, count]
+    for dia in sorted(standalone):
+        for c in clusters:
+            if _close(dia, c[0]):
+                c[1] += 1
+                break
+        else:
+            clusters.append([dia, 1])
+
+    for rep, count in clusters:
+        entry = {"kind": "hole", "diameter_mm": rep}
+        # Assert an exact count only when no pattern shares this Ø (within tol):
+        # verify matches by diameter only (pattern members included), so a count
+        # alongside a same-Ø pattern would double-count → at-least-one fallback.
+        if not any(_close(rep, pd) for pd in pattern_dia_counts):
+            entry["count"] = count
+        feats.append(entry)
+
+    boss_counts: Counter = Counter(
+        (_round(b["diameter"]), _round(b["height"]))
+        for b in bosses
+        if b.get("diameter") is not None and b.get("height") is not None
+    )
+    for (dia, h), _cnt in boss_counts.items():
+        feats.append({"kind": "boss", "diameter_mm": dia, "height_mm": h})
+    return feats
+
+
+def _suggest_parameters(session) -> list:
+    from build123d_mcp._design_audit_subprocess import _extract_params
+    from build123d_mcp.tools.design_audit import _assemble
+
+    program = _assemble(session)
+    params = _extract_params(program)[0] if program else []
+    out = []
+    for p in params:
+        if p.get("reassigned"):
+            continue  # a band around the first (dead) value would be misleading
+        v = p["value"]
+        if not math.isfinite(v):
+            continue  # an overflow literal (1e999→inf) would emit non-strict-JSON
+        lo, hi = sorted((v * 0.9, v * 1.1))  # ±10%, order-safe for negative v
+        if hi - lo < _ABS_TOL:  # zero / near-zero → widen to an absolute band
+            lo, hi = v - _ABS_TOL, v + _ABS_TOL
+        out.append({"name": p["name"], "min": round(lo, 4), "max": round(hi, 4)})
+    return out
+
+
+def suggest_spec(session, object_name: str = "") -> str:
+    """Draft a starter design-intent spec from the current (or named) shape.
+
+    Introspects the shape with the same primitives verify_spec checks against
+    (bbox, validity gate, feature recognition, parameter extraction) and returns
+    a spec that describes what was built — so the agent edits detected values
+    against the intended drawing rather than authoring from scratch. Envelope /
+    volume use a ±2% band and parameters a ±10% band (editable defaults).
+    """
+    shape, err = _resolve_shape(session, object_name)
+    if err is not None:
+        return err
+
+    from build123d_mcp.tools.measure import measure as _measure
+
+    m = json.loads(_measure(session, object_name))
+    gate = _gate_report(shape)
+    bb = m["bbox"]
+    vlo, vhi = _pct_band(m["volume"])
+    spec = {
+        "envelope_mm": {ax: _pct_band(bb[f"{ax}size"]) for ax in ("x", "y", "z")},
+        "solid": {"count": gate["n_solids"], "valid": bool(gate["passes_gate"])},
+        "volume_mm3": {"min": vlo, "max": vhi},
+        "features": _suggest_features(session, object_name),
+        "parameters": _suggest_parameters(session),
+    }
+    return json.dumps(
+        {
+            "spec": spec,
+            "note": (
+                "Detected from the CURRENT shape — a starter, not ground truth. Review and edit each "
+                "value against your intended drawing (the bands are editable defaults), then pass the "
+                "`spec` object to verify_spec(). Not captured: absolute positions; countersinks (drafted "
+                "as plain holes — add `counterbore`/`spotface`/a `countersink` feature yourself), wall "
+                "thickness (`wall_thickness_at`/`min_wall_mm`), material_at_point, and cosmetic/other "
+                "features (fillets, chamfers, pockets, ribs) the recognizers don't cover."
+            ),
         },
         indent=2,
     )

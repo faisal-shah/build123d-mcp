@@ -5,7 +5,7 @@ import json
 import pytest
 
 from build123d_mcp.session import Session
-from build123d_mcp.tools.verify_spec import verify_spec
+from build123d_mcp.tools.verify_spec import suggest_spec, verify_spec
 
 
 @pytest.fixture
@@ -486,3 +486,103 @@ def test_material_at_point_malformed_clean_error(session):
             )
         )
         assert "error" in r, bad
+
+
+def test_suggest_spec_round_trips_and_detects_features(session):
+    session.execute(_PLATE)
+    sug = json.loads(suggest_spec(session, "part"))
+    spec = sug["spec"]
+    # detected the bolt circle (deduped — no standalone hole entry for its members)
+    kinds = [f["kind"] for f in spec["features"]]
+    assert kinds == ["hole_pattern"]
+    bc = spec["features"][0]
+    assert bc["pattern"] == "bolt_circle" and bc["holes"] == 4
+    assert bc["bcd_mm"] == 40.0 and bc["diameter_mm"] == 6.6
+    assert spec["solid"] == {"count": 1, "valid": True}
+    assert any(p["name"] == "plate_thickness" for p in spec["parameters"])
+    # the drafted spec, fed back, conforms on the unchanged part
+    r = json.loads(verify_spec(session, spec=json.dumps(spec), object_name="part"))
+    assert r["summary"]["conforms"] is True and r["summary"]["fail"] == 0
+
+
+def test_suggest_spec_errors_without_a_shape():
+    s = Session()
+    s.execute("from build123d import *")
+    assert "error" in json.loads(suggest_spec(s))
+
+
+def _roundtrip(session, program, obj=""):
+    session.execute(program)
+    spec = json.loads(suggest_spec(session, obj))["spec"]
+    return spec, json.loads(verify_spec(session, spec=json.dumps(spec), object_name=obj))["summary"]
+
+
+def test_suggest_spec_pattern_plus_standalone_holes_round_trips(session):
+    # bolt circle Ø6 + a same-Ø standalone hole of different depth: the emitted
+    # standalone hole must NOT carry an exact count (verify counts pattern members too).
+    spec, summ = _roundtrip(
+        session,
+        "with BuildPart() as p:\n"
+        "    Box(80, 80, 20)\n"
+        "    with PolarLocations(30, 4):\n"
+        "        Hole(3)\n"
+        "    with Locations((0, 0)):\n"
+        "        Hole(3, depth=5)\n"
+        "show(p.part, 'p')\n",
+        "p",
+    )
+    assert summ["conforms"] is True
+    hole = next(f for f in spec["features"] if f["kind"] == "hole")
+    assert "count" not in hole  # dropped because a same-Ø pattern exists
+
+
+def test_suggest_spec_negative_parameter_round_trips(session):
+    spec, summ = _roundtrip(
+        session, "offset = -10.0\nshow(Pos(offset, 0, 0) * Box(20, 20, 20), 'p')\n", "p"
+    )
+    assert summ["conforms"] is True
+    p = next(p for p in spec["parameters"] if p["name"] == "offset")
+    assert p["min"] <= -10.0 <= p["max"]  # band brackets the value (order-safe)
+
+
+def test_suggest_spec_near_zero_parameter_round_trips(session):
+    _, summ = _roundtrip(session, "w = 1e-9\nshow(Box(20, 20, 20), 'p')\n", "p")
+    assert summ["conforms"] is True
+
+
+def test_suggest_spec_skips_reassigned_parameter(session):
+    spec, _ = _roundtrip(session, "t = 2\nt = 5\nshow(Box(20, 20, t), 'p')\n", "p")
+    assert all(p["name"] != "t" for p in spec["parameters"])
+
+
+def test_suggest_spec_sub_millimetre_dimension_round_trips(session):
+    _, summ = _roundtrip(session, "show(Box(0.006, 5, 5), 'p')\n", "p")
+    assert summ["conforms"] is True
+
+
+def test_suggest_spec_near_diameter_standalone_holes_round_trip(session):
+    # two holes 0.04 mm apart in radius (within verify's 0.1 mm match tol) must be
+    # one clustered entry with the combined count, not two count-1 entries that both
+    # match both holes.
+    spec, summ = _roundtrip(
+        session,
+        "with BuildPart() as p:\n"
+        "    Box(60, 40, 12)\n"
+        "    with Locations((-15, 0)):\n"
+        "        Hole(2.5)\n"
+        "    with Locations((15, 0)):\n"
+        "        Hole(2.54)\n"
+        "show(p.part, 'p')\n",
+        "p",
+    )
+    assert summ["conforms"] is True
+    holes = [f for f in spec["features"] if f["kind"] == "hole"]
+    assert len(holes) == 1 and holes[0]["count"] == 2
+
+
+def test_suggest_spec_skips_non_finite_parameter(session):
+    # an overflow literal (1e999 → inf) must not leak non-strict-JSON into the spec.
+    session.execute("overflow = 1e999\nshow(Box(20, 20, 20), 'p')\n")
+    out = suggest_spec(session, "p")
+    json.loads(out, parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)))  # strict
+    assert json.loads(out)["spec"]["parameters"] == []
