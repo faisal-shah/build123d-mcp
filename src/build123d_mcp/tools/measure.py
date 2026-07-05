@@ -113,7 +113,10 @@ def _face_inventory(shape) -> list:
             info["axis"] = (round(d.X(), 3), round(d.Y(), 3), round(d.Z(), 3))
         elif stype == GeomAbs_Cone:
             cone = adaptor.Cone()
-            info["semi_angle_deg"] = round(math.degrees(cone.SemiAngle()), 2)
+            # abs(): a cone's half-angle is conventionally non-negative, and the raw
+            # sign tracks the axis direction — which a STEP round-trip can flip, so
+            # reporting the magnitude keeps the value stable in vs out of process (#360).
+            info["semi_angle_deg"] = round(abs(math.degrees(cone.SemiAngle())), 2)
         elif stype == GeomAbs_Sphere:
             sph = adaptor.Sphere()
             info["radius"] = round(sph.Radius(), 4)
@@ -260,8 +263,20 @@ def _cross_sections(shape, axis: str = "Z", num_slices: int = 10) -> list:
 
 
 def measure(session, object_name: str = "", density: float = 0.0, material: str = "") -> str:
+    from build123d_mcp.tools._bounded import run_bounded_shape_op
+
     rho = _resolve_density(density, material)
     shape = _resolve_shape(session, object_name)
+    return run_bounded_shape_op(
+        session,
+        "measure",
+        {"": shape},
+        {"rho": rho},
+        in_process=lambda: _measure_report(shape, rho),
+    )
+
+
+def _measure_report(shape, rho: float) -> str:
     bb = shape.bounding_box()
     cx = round((bb.min.X + bb.max.X) / 2, 4)
     cy = round((bb.min.Y + bb.max.Y) / 2, 4)
@@ -325,12 +340,41 @@ def clearance(session, object_a: str, object_b: str) -> str:
     Always reports intersection_volume + a_volume_outside_b + b_volume_outside_a
     so the LLM can reason about the magnitude of overlap without a second call.
     """
+    from build123d_mcp.tools._bounded import run_bounded_shape_op
+
     for name in (object_a, object_b):
         if name not in session.objects:
             raise ValueError(f"Unknown object '{name}'. Registered: {list(session.objects.keys())}")
     a = session.objects[object_a]
     b = session.objects[object_b]
+    return run_bounded_shape_op(
+        session,
+        "clearance",
+        {"a": a, "b": b},
+        {},
+        in_process=lambda: _clearance_report(a, b),
+    )
 
+
+def _as_compound(s):
+    # Normalise a shape's wrapper to a Compound. Whether a build123d shape is a bare
+    # Solid or a Compound is unstable — a STEP round-trip flips it either way, and a
+    # .solids() extraction / moved import yields a Solid — and clearance answers differ
+    # by wrapper: distance_to() reads 0 for a shape contained in a Solid (vs the true
+    # surface gap for a Compound), and on build123d 0.10 an empty boolean (one shape
+    # fully inside the other) returns a ShapeList with no .volume. A modeller shape is
+    # already a Compound, so this is a no-op there and leaves the common case unchanged.
+    from build123d import Compound
+
+    return s if type(s.wrapped).__name__ == "TopoDS_Compound" else Compound([s])
+
+
+def _clearance_report(a, b) -> str:
+    # Normalise both wrappers so the distance AND the containment booleans are computed
+    # the same way regardless of how each shape was built or serialised — clearance is
+    # then identical in vs out of process, and correct for imported/extracted bare solids.
+    a = _as_compound(a)
+    b = _as_compound(b)
     dist = a.distance_to(b)
 
     # Boolean ops for containment / overlap detection. Each can fail for
