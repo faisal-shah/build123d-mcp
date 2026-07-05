@@ -1,6 +1,7 @@
 import copy
 import io
 import signal
+import time
 from contextlib import redirect_stderr, redirect_stdout
 from typing import Any
 
@@ -22,8 +23,31 @@ _INJECTED = frozenset(
         "register_centerline",
         "set_page",
         "save_json",
+        # Analysis primitives (#366): the same computations as the measure/clearance/
+        # cross_sections/find_holes tools, callable in code so results compose without
+        # hand-copying numbers out of a JSON tool result.
+        "measure",
+        "clearance",
+        "cross_sections",
+        "find_holes",
     }
 )
+
+
+def _bounded_result(out: str):
+    """Parse what run_bounded_shape_op returned into a Python object. The bounded path
+    hands back an ``Error: ...`` string on timeout/failure — not JSON — so surface that
+    as an exception, letting an in-namespace primitive fail loudly rather than return
+    an unparseable string the caller would then try to subscript."""
+    import json
+
+    try:
+        return json.loads(out)
+    except (json.JSONDecodeError, TypeError) as exc:
+        # `out` is already an "Error: ..." string; strip the prefix so execute()'s own
+        # "Error: {type}: {msg}" wrapping doesn't double it up.
+        raise RuntimeError(out.removeprefix("Error: ")) from exc
+
 
 # save_json: cap on the serialized payload, and the only characters allowed in
 # a file stem (no path separators, so the write cannot leave _SAVE_JSON_DIR).
@@ -358,6 +382,116 @@ class Session:
 
         self.namespace["save_json"] = save_json
 
+        # --- Analysis primitives (#366) -------------------------------------- #
+        # Same computations as the measure/clearance/cross_sections/find_holes tools,
+        # but callable in code and returning real Python objects, so an agent composes
+        # over results (arithmetic, filtering) instead of hand-copying numbers out of a
+        # JSON tool result. measure/clearance/cross_sections route through the SAME
+        # bounded-subprocess path as the tools (run_bounded_shape_op) so a large shape
+        # can't SIGKILL the session (#360); the JSON they carry is parsed back to a dict.
+
+        def _exec_budget_left() -> int:
+            # execute()'s watchdog counts from execute() start, so a primitive called
+            # after heavy pre-work has only the REMAINING budget. Bound the subprocess to
+            # that, not the full exec_timeout — else on Windows (no SIGALRM backstop) it
+            # could outlive the parent poll and orphan the child (#376 review).
+            started = getattr(session_ref, "_execute_started", None)
+            if started is None:
+                return session_ref.exec_timeout
+            return int(session_ref.exec_timeout - (time.monotonic() - started))
+
+        def measure(shape: Any = None, density: float = 0.0, material: str = "") -> dict:
+            """Measure a shape → dict (volume, area, bbox, topology, center_of_mass,
+            inertia, face_inventory). Compose in code: measure(part)["volume"]. shape
+            defaults to the current shape. Large shapes run out-of-process, bounded."""
+            from build123d_mcp.tools._bounded import run_bounded_shape_op
+            from build123d_mcp.tools.measure import _measure_report, _resolve_density
+
+            s = shape if shape is not None else session_ref.current_shape
+            if s is None:
+                raise ValueError("measure(): no shape given and no current shape in the session")
+            rho = _resolve_density(density, material)
+            data = _bounded_result(
+                run_bounded_shape_op(
+                    session_ref,
+                    "measure",
+                    {"": s},
+                    {"rho": rho},
+                    in_process=lambda: _measure_report(s, rho),
+                    budget=_exec_budget_left(),  # remaining execute() budget, not op_budget
+                )
+            )
+            print(
+                f"measure: volume={data['volume']}, area={data['area']}, "
+                f"faces={data['topology']['faces']}"
+            )
+            return data
+
+        self.namespace["measure"] = measure
+
+        def clearance(a: Any, b: Any) -> dict:
+            """Spatial relationship between two shapes → dict (clearance, status,
+            containment, intersection_volume, …). clearance(a, b)["clearance"] is a
+            float you can branch on. Large shapes run out-of-process, bounded."""
+            from build123d_mcp.tools._bounded import run_bounded_shape_op
+            from build123d_mcp.tools.measure import _clearance_report
+
+            data = _bounded_result(
+                run_bounded_shape_op(
+                    session_ref,
+                    "clearance",
+                    {"a": a, "b": b},
+                    {},
+                    in_process=lambda: _clearance_report(a, b),
+                    budget=_exec_budget_left(),  # remaining execute() budget, not op_budget
+                )
+            )
+            print(f"clearance: {data['status']}, clearance={data['clearance']}")
+            return data
+
+        self.namespace["clearance"] = clearance
+
+        def cross_sections(shape: Any = None, axis: str = "Z", num_slices: int = 10) -> list:
+            """Cross-sectional areas along an axis → list of {position, area} dicts.
+            shape defaults to the current shape. Large shapes run out-of-process, bounded."""
+            from build123d_mcp.tools._bounded import run_bounded_shape_op
+            from build123d_mcp.tools.cross_sections import _cross_sections_report
+
+            s = shape if shape is not None else session_ref.current_shape
+            if s is None:
+                raise ValueError("cross_sections(): no shape given and no current shape")
+            data = _bounded_result(
+                run_bounded_shape_op(
+                    session_ref,
+                    "cross_sections",
+                    {"": s},
+                    {"axis": axis, "num_slices": num_slices},
+                    in_process=lambda: _cross_sections_report(s, axis, num_slices),
+                    budget=_exec_budget_left(),  # remaining execute() budget, not op_budget
+                )
+            )
+            print(f"cross_sections: {len(data)} slice(s) along {axis}")
+            return data
+
+        self.namespace["cross_sections"] = cross_sections
+
+        def find_holes(shape: Any = None) -> list:
+            """Recognise drilled holes → the recogniser's records (with .location — an
+            (x, y, z) tuple — plus .diameter, .depth, .axis, …), so you can filter in
+            code: [h for h in find_holes(part) if h.location[0] < 5]. Full precision
+            (unlike the JSON tool, which rounds). shape defaults to the current shape.
+            Runs in-process — same cost as the find_holes tool on a large solid."""
+            from build123d_drafting import find_holes as _recognise_holes
+
+            s = shape if shape is not None else session_ref.current_shape
+            if s is None:
+                raise ValueError("find_holes(): no shape given and no current shape")
+            holes = list(_recognise_holes(s))
+            print(f"find_holes: {len(holes)} hole(s)")
+            return holes
+
+        self.namespace["find_holes"] = find_holes
+
     def _shape_summary(self, shape) -> dict | None:
         """Pull volume/bbox/topology from a shape; None if anything errors."""
         try:
@@ -499,6 +633,9 @@ class Session:
         objects_before = dict(self.objects)
         annotations_before = dict(self.drawing_annotations)
         self._shape_explicitly_set = False
+        # Reference point for the execute() timeout: an in-namespace analysis primitive
+        # (#366) bounds any subprocess it spawns to the REMAINING budget from here.
+        self._execute_started = time.monotonic()
 
         buf = io.StringIO()
         exc: Exception | None = None
