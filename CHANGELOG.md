@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **`export()` now rewrites one-component assembly STEP output even when build123d's high-level writer reports success.** The v0.3.65 fix covered the import-derived solid path where `export_step()` raises, but fresh one-solid wrappers such as located primitives can return success while still writing `NEXT_ASSEMBLY_USAGE_OCCURRENCE`. `export()` now checks the written STEP structure for every single-solid export, bakes any non-identity location into the one solid, and retries the CAF writer so the output stays flat while preserving names and colours. Genuine multi-solid compounds still export as assemblies.
+
 ## v0.3.69
 
 ### Added
