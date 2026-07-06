@@ -5,6 +5,7 @@ from pathlib import Path
 from build123d_mcp.tools.install_skill import (
     _END,
     _START,
+    SKILLS,
     TARGETS,
     _dest_exists,
     _load_raw,
@@ -72,7 +73,7 @@ def test_shipped_skills_have_no_personal_markers():
     """[SEND:]/[ASK:] are conventions of the maintainer's own client setup —
     the claude install target ships SKILL.md verbatim, so the source files
     must spell the instructions out in plain English instead."""
-    for skill in ("drawing", "modeling"):
+    for skill in SKILLS:
         raw = _load_raw(skill)
         assert "[SEND:" not in raw, f"{skill} skill contains a [SEND:] marker"
         assert "[ASK:" not in raw, f"{skill} skill contains an [ASK:] marker"

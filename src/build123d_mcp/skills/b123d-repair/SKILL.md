@@ -30,14 +30,20 @@ Do not apply repairs blind. First identify the defect class and its location.
 2. **Get coordinates.** `locate_gate_defects()` returns the failing edge/face's
    3D position and B-rep identity — repair that exact spot, never chase the
    defect blind.
-3. **Localize the face** when BRepCheck is the failure:
+3. **Localize the face** when BRepCheck is the failure — build ONE analyzer
+   over the whole solid, not one per face (`locate_gate_defects()` itself
+   runs out-of-process specifically because per-face BRepCheck work "can run
+   for minutes on a complex part"; reconstructing an analyzer per face inside
+   `execute()` on a large import risks the same timeout):
 
    ```python
    from OCP.BRepCheck import BRepCheck_Analyzer
-   suspects = []
-   for i, f in enumerate(part.faces()):
-       if not BRepCheck_Analyzer(f.wrapped).IsValid() or abs(f.area) < 1e-6:
-           suspects.append((i, f.geom_type, round(f.area, 6), f.center()))
+   analyzer = BRepCheck_Analyzer(part.wrapped)   # one pass over the whole solid
+   suspects = [
+       (i, f.geom_type, round(f.area, 6), f.center())
+       for i, f in enumerate(part.faces())
+       if not analyzer.IsValid(f.wrapped) or abs(f.area) < 1e-6
+   ]
    print(suspects)   # match centers against locate_gate_defects() coordinates
    ```
 
@@ -69,6 +75,15 @@ healed = Part(fix.Shape())
 
 Fails when: the face is genuinely unorientable (its own wire is inconsistent) —
 ShapeFix reports success but the export gate still FAILs. Move to rung 2.
+
+This rung operates on the whole shape, so it's the one place this ladder's
+"only touch the defect" discipline needs a caveat: the standing rule to
+**prefer targeted solid repair over broad shape healing** (global healing
+can reorient faces or collapse volume) still applies here. Treat `healed`
+as a candidate, not the result — the Step 2 volume/bbox check is what makes
+this rung safe to try first; if it moves anything beyond the defect's own
+faces, discard it and go straight to rung 3 (defeature), which is targeted
+by construction.
 
 ### Rung 2 — a clean boolean heals the B-rep
 
@@ -131,12 +146,15 @@ these four, in order:
    ```python
    from OCP.BRepBuilderAPI import BRepBuilderAPI_Sewing
    from OCP.ShapeFix import ShapeFix_Solid
+   from OCP.TopoDS import TopoDS
    sew = BRepBuilderAPI_Sewing(0.6)          # tol > sliver width
    for f in part.faces():
        if not f.wrapped.IsSame(bad_face.wrapped):
            sew.Add(f.wrapped)
    sew.Perform()
-   # wrap the sewn shell into a solid, then ShapeFix_Solid to orient it
+   shell = TopoDS.Shell_s(sew.SewedShape())       # sewn result -> TopoDS_Shell
+   solid = ShapeFix_Solid().SolidFromShell(shell)  # orient into a proper solid
+   healed = Part(solid)
    ```
 
 3. **Patch + small-tolerance sew.** On a *wide* sliver (~2-3 mm), drop+sew
