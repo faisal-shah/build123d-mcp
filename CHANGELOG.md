@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`b123d-repair` skill: a validity-gate repair cookbook (`build123d://skill/repair`, `install_skill(skill="repair")`).** Until now the server could *diagnose* an invalid solid (`validate()` reasons, `locate_gate_defects()` coordinates) but offered no guidance on *fixing* one — and field runs show agents burning entire sessions failing to heal a BRepCheck-broken import that a known recipe repairs in minutes. The skill distills field-proven repairs from real defective parts into a defect-class-keyed escalation ladder: diagnose from the gate output first, then `ShapeFix_Shape` → clean-boolean re-computation → `BRepAlgoAPI_Defeaturing` → four-stage sliver-face surgery (ruled-face replace → drop+tolerant-sew → patch+small-sew → thin-box cut), plus the mesh-gate-only variant for unmeshable ~zero-area faces. Every rung states when it applies, when it fails, and what to try next, with the two observed silent-failure traps as mandatory checks (defeaturing filling an internal bore at +14% volume; booleans dropping the invalid solid). Includes the heal-FIRST workflow for editing an invalid import (a valid baseline exists on disk before the edit starts) and an avoidance section for the constructions that create these defects (exactly-coincident faces, tangencies). The `export()` gate-fail message now points at the skill — discovery at the moment of need.
+
 ## v0.3.68
 
 ### Added
