@@ -182,9 +182,10 @@ the same way.
 
 - **The export gate is authoritative.** An in-memory heal can be fake:
   `validate()` on the live shape passes, then the written-and-reimported STEP
-  fails. Always `export()` to a throwaway path and read its gate verdict; on
-  large shapes `validate()` may also fall back to a bounded fast mesh check,
-  so its PASS is a screen, not a verdict.
+  fails. Always `export()` to a throwaway path and read its gate verdict; on a
+  huge shape `validate()`'s own mesh check can come back `mesh_check: "skipped"`
+  (too large to stitch even out-of-process) with a "not verified" warning, so
+  treat its PASS as a screen, not a verdict.
 - **A heal must not change the geometry.** Compare `volume` and bounding box
   before/after: the acceptable delta is the scale of the defect (a sliver's
   near-zero volume), never a feature's. A heal that gains or loses real volume
