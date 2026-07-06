@@ -113,35 +113,97 @@ without plugging.
 
 ```python
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Defeaturing
+from OCP.TopoDS import TopoDS
 df = BRepAlgoAPI_Defeaturing()
 df.SetShape(part.wrapped)
 df.AddFaceToRemove(bad_face.wrapped)
 df.Build()
-healed = Part(df.Shape())
+healed = Solid(TopoDS.Solid_s(df.Shape()))   # NOT Part(df.Shape()) — see below
 ```
 
-**Volume check is mandatory here**: defeaturing can silently *fill an internal
+**Wrap the result in `Solid`, not `Part`.** `Part(df.Shape())` has been
+observed, on a real defeatured shape, to silently report `volume=0` even
+though `IsDone()` is True and the geometry is genuinely fine — the wrapper is
+broken, not the operation. `Solid(TopoDS.Solid_s(df.Shape()))` recovers the
+correct volume on the identical shape. Whichever wrapper you use, sanity-check
+the result's volume against the pre-heal volume before concluding anything
+about whether the defeature itself worked.
+
+**Volume check is mandatory too**: defeaturing can silently *fill an internal
 bore* whose wall included the removed face (observed: +14% volume — a ruined
 part that passed the gate). Accept the heal only if the volume delta is on the
 scale of the defect itself, not of a feature.
 
-Fails when: the sliver's neighbours can't extend to close the gap, or the
-defeature output fails the gate. Move to rung 4.
+Fails when: the sliver's neighbours can't extend to close the gap, the
+defeature output fails the gate, or the (correctly-wrapped) healed volume
+comes back zero or wildly different despite `IsDone()` reporting success —
+defeaturing can silently produce a degenerate shape on a genuinely
+non-planar/complex face, not just run slowly or need a longer timeout. Don't
+retry with different tolerances; move to rung 4.
 
 ### Rung 4 — face surgery for an unorientable sliver
 
 Thin sliver faces (a degenerate fillet remnant, a band between near-coincident
 arcs) are the classic BRepCheck killer on imported castings. Escalate through
-these four, in order:
+these, in order:
 
-1. **Replace with a ruled face.** Build a `BRepFill` ruled face between the
-   sliver's two long edges, drop the original, sew everything at small
-   tolerance. Works when the sliver's bounding edges are clean but its surface
-   is garbage.
-2. **Drop + tolerant sew.** When the sliver's own wire is broken (a ruled/fill
-   replacement comes out unorientable too), delete the face entirely and sew
-   the neighbours with **tolerance greater than the sliver's width** (e.g.
-   0.6 mm for a 0.5 mm sliver), then `ShapeFix_Solid` to orient the shell:
+1. **Rebuild directly from the face's own wire, if planar.** The cheapest,
+   most literal fix — zero geometry change, since the boundary itself is
+   untouched:
+
+   ```python
+   from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
+   from OCP.BRepTools import BRepTools_ReShape
+   from OCP.TopExp import TopExp_Explorer
+   from OCP.TopAbs import TopAbs_WIRE
+   from OCP.TopoDS import TopoDS
+   wire = TopoDS.Wire_s(TopExp_Explorer(bad_face.wrapped, TopAbs_WIRE).Current())
+   mk = BRepBuilderAPI_MakeFace(wire, True)
+   if mk.IsDone():
+       reshaper = BRepTools_ReShape()
+       reshaper.Replace(bad_face.wrapped, mk.Face())
+       healed = Solid(TopoDS.Solid_s(reshaper.Apply(part.wrapped)))
+   ```
+
+   Only works when the wire is (at least close to) planar — on a genuinely
+   non-planar/BSpline surface `MakeFace` raises `Standard_Failure ... NULL
+   shape` (or `IsDone()` is False). That failure **is** the signal to move to
+   option 2, not a reason to retry this one.
+2. **Fill the boundary with a new surface.** For a non-planar face, build a
+   fresh surface spanning the *same* wire's edges instead of assuming
+   planarity — `BRepFill_Filling`, adding every edge of the wire, handles an
+   arbitrary N-edge boundary (a plain `BRepFill` ruled face only spans exactly
+   2 edges — use that simpler form only when the sliver truly has just 2 long
+   bounding edges):
+
+   ```python
+   from OCP.BRepFill import BRepFill_Filling
+   from OCP.GeomAbs import GeomAbs_C0
+   from OCP.TopExp import TopExp_Explorer
+   from OCP.TopAbs import TopAbs_EDGE
+   from OCP.TopoDS import TopoDS
+   from OCP.BRepTools import BRepTools_ReShape
+   edges, exp = [], TopExp_Explorer(bad_face.wrapped, TopAbs_EDGE)
+   while exp.More():
+       edges.append(TopoDS.Edge_s(exp.Current())); exp.Next()
+   filling = BRepFill_Filling()
+   for e in edges:
+       filling.Add(e, GeomAbs_C0, True)
+   filling.Build()
+   reshaper = BRepTools_ReShape()
+   reshaper.Replace(bad_face.wrapped, filling.Face())
+   healed = Solid(TopoDS.Solid_s(reshaper.Apply(part.wrapped)))
+   ```
+
+   `filling.IsDone()` can be True while `BRepCheck_Analyzer` still reports the
+   raw filled face invalid — that's expected here; verify via a full re-sew
+   (next) and the export gate, not the raw face check. A follow-up re-sew of
+   every face at a small tolerance (0.005-0.05 mm) after the patch often
+   closes the residual gap the fill alone leaves.
+3. **Drop + tolerant sew.** When the wire itself is broken (both options above
+   fail), delete the face entirely and sew the neighbours with **tolerance
+   greater than the sliver's width** (e.g. 0.6 mm for a 0.5 mm sliver), then
+   `ShapeFix_Solid` to orient the shell:
 
    ```python
    from OCP.BRepBuilderAPI import BRepBuilderAPI_Sewing
@@ -154,14 +216,14 @@ these four, in order:
    sew.Perform()
    shell = TopoDS.Shell_s(sew.SewedShape())       # sewn result -> TopoDS_Shell
    solid = ShapeFix_Solid().SolidFromShell(shell)  # orient into a proper solid
-   healed = Part(solid)
+   healed = Solid(solid)
    ```
 
-3. **Patch + small-tolerance sew.** On a *wide* sliver (~2-3 mm), drop+sew
+4. **Patch + small-tolerance sew.** On a *wide* sliver (~2-3 mm), drop+sew
    goes non-manifold (the big tolerance welds faces that shouldn't meet).
-   Instead fill the sliver's boundary wire with a `BRepFill` patch face and
+   Instead fill the sliver's boundary wire with a filling face (option 2) and
    sew at small tolerance.
-4. **Cut it out.** When the sliver is intrinsic to the geometry (a curved band
+5. **Cut it out.** When the sliver is intrinsic to the geometry (a curved band
    between two near-coincident arcs), in-memory fixes only *fake-heal* — the
    gate fails again after the export round-trip. Remove the region physically:
    boolean-subtract a thin box enclosing the sliver. This changes geometry by
@@ -186,10 +248,14 @@ the same way.
   huge shape `validate()`'s own mesh check can come back `mesh_check: "skipped"`
   (too large to stitch even out-of-process) with a "not verified" warning, so
   treat its PASS as a screen, not a verdict.
-- **A heal must not change the geometry.** Compare `volume` and bounding box
-  before/after: the acceptable delta is the scale of the defect (a sliver's
-  near-zero volume), never a feature's. A heal that gains or loses real volume
-  replaced your part with a different part.
+- **A heal must not change the geometry — but it must change *something*.**
+  Compare `volume` and bounding box before/after: the acceptable delta is the
+  scale of the defect (a sliver's near-zero volume), never a feature's. A heal
+  that gains or loses real volume replaced your part with a different part.
+  Conversely, `show()`'s own "shape was rebound but volume/topology/bbox
+  unchanged" warning means the attempt changed nothing at all — a rewrap, not
+  a repair — so the original defect is still there even though no error was
+  raised; move to the next rung rather than trusting it.
 - **Never keep iterating on an invalid solid.** If a rung's attempt fails the
   gate, `restore_snapshot()` back to the pre-attempt state before trying the
   next rung — stacked failed repairs compound.
@@ -226,6 +292,15 @@ construction, not the corpse:
   `validate()` and FAIL the export gate with non-manifold or open edges.
   Interpenetrate: bury the added feature 1-2 mm into the base, make the
   footprint 2-3 mm larger, or extend past and trim with one planar cut.
+- **When a feature can be built either as an addition or a removal, prefer the
+  removal.** Raising/relocating a face by *unioning new material onto an
+  existing boundary* runs straight into the coincident-face trap above — the
+  new material must fuse exactly flush with what's already there. The same
+  visible result reached by *cutting material away* instead (e.g. treating a
+  face move as an internal step/ledge to deepen rather than an external boss
+  to add) only has to remove material cleanly, with no flush-fuse boundary to
+  get wrong. When a spec is genuinely ambiguous between an additive and a
+  subtractive reading, the subtractive one is the safer default.
 - **Tangencies leave open edges.** A hole tangent to a coaxial hub wall, a
   boss grazing a torus fillet — nudge the position ~0.3 mm or extend the boss
   coaxial with the adjacent straight cylinder so the intersection is clean.
