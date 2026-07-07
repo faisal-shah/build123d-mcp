@@ -81,16 +81,44 @@ def as_solid(shape):
         return Solid(TopoDS.Solid_s(shape))
     if st == TopAbs_SHELL:
         return Solid(ShapeFix_Solid().SolidFromShell(TopoDS.Shell_s(shape)))
-    exp = TopExp_Explorer(shape, TopAbs_SOLID)
-    if exp.More():
-        return Solid(TopoDS.Solid_s(exp.Current()))
-    raise RuntimeError(f"no solid found in shape of type {st}")
+
+    solids, exp = [], TopExp_Explorer(shape, TopAbs_SOLID)
+    while exp.More():
+        solids.append(TopoDS.Solid_s(exp.Current())); exp.Next()
+    if len(solids) == 1:
+        return Solid(solids[0])
+    if len(solids) > 1:
+        raise RuntimeError(
+            f"expected 1 solid, found {len(solids)} in a {st} — "
+            "the operation likely didn't fully merge"
+        )
+
+    shells, exp = [], TopExp_Explorer(shape, TopAbs_SHELL)
+    while exp.More():
+        shells.append(TopoDS.Shell_s(exp.Current())); exp.Next()
+    if len(shells) == 1:
+        return Solid(ShapeFix_Solid().SolidFromShell(shells[0]))
+    if len(shells) > 1:
+        raise RuntimeError(
+            f"expected 1 shell, found {len(shells)} in a {st} — sewing likely split the part"
+        )
+
+    raise RuntimeError(f"no solid or shell found in shape of type {st}")
 ```
 
-Sanity-check the wrapped result's volume against the pre-heal volume every
-time — whichever wrapper you use, a wrapping bug or a genuinely bad heal both
-show up the same way (a wrong or zero volume), so the check is what actually
-tells them apart.
+Never silently pick a solid/shell out of several — a raw result with more than
+one almost always means the operation didn't fully merge or a sew split the
+part, and picking one arbitrarily reintroduces the exact silent-partial-volume
+bug this helper exists to eliminate. Sanity-check the wrapped result's volume
+against the pre-heal volume every time regardless — whichever wrapper you use,
+a wrapping bug or a genuinely bad heal both show up the same way (a wrong or
+zero volume), so the check is what actually tells them apart.
+
+Because build123d-mcp's `execute()` namespace persists across calls, a rung
+whose attempt raises does **not** clear a previous rung's `healed` — reassign
+`healed = None` before each attempt and check `healed is not None` before
+trusting it, rather than assuming a bare reference reflects the rung you just
+tried.
 
 ### Rung 1 — `ShapeFix_Shape` (seconds, non-destructive)
 
@@ -183,19 +211,24 @@ these, in order:
    outer = bad_face.outer_wire()
    inner_wires = [w for w in bad_face.wires() if not w.wrapped.IsSame(outer.wrapped)]
    mk = BRepBuilderAPI_MakeFace(outer.wrapped, True)
-   for w in inner_wires:
-       mk.Add(w.wrapped)
    if not mk.IsDone():
        raise RuntimeError("MakeFace failed — non-planar wire, move to option 2")
+   for w in inner_wires:
+       mk.Add(w.wrapped)
    reshaper = BRepTools_ReShape()
    reshaper.Replace(bad_face.wrapped, mk.Face())
    healed = as_solid(reshaper.Apply(part.wrapped))
    ```
 
-   Only works when the wire is (at least close to) planar — on a genuinely
-   non-planar/BSpline surface `MakeFace` raises `Standard_Failure ... NULL
-   shape`, or `IsDone()` is False and the `raise` above fires. That failure
-   **is** the signal to move to option 2, not a reason to retry this one.
+   Check `IsDone()` right after constructing `mk`, **before** adding any inner
+   wires — calling `.Add()` on a builder that already failed doesn't raise a
+   catchable exception, it segfaults the whole process (verified: reproduced
+   directly on a non-planar wire, exit code 139). Only works when the wire is
+   (at least close to) planar — on a genuinely non-planar/BSpline surface
+   `MakeFace` raises `Standard_Failure ... NULL shape`, or `IsDone()` is False
+   and the `raise` above fires before any `.Add()` call is reached. That
+   failure **is** the signal to move to option 2, not a reason to retry this
+   one.
 2. **Fill the boundary with a new surface.** For a non-planar face, build a
    fresh surface spanning the *same* wire's edges instead of assuming
    planarity — `BRepFill_Filling`, adding every edge of the wire, handles an
