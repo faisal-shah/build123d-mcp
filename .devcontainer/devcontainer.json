@@ -1,0 +1,29 @@
+{
+  "name": "build123d-mcp",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "postCreateCommand": "uv sync --all-groups && uv run build123d-mcp --version",
+  "forwardPorts": [8000],
+  "portsAttributes": {
+    "8000": {
+      "label": "build123d-mcp HTTP transport",
+      "onAutoForward": "notify"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "GitHub.copilot",
+        "GitHub.copilot-chat",
+        "ms-python.python",
+        "charliermarsh.ruff"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+        "python.analysis.extraPaths": ["${workspaceFolder}/src"],
+        "python.terminal.activateEnvironment": true
+      }
+    }
+  }
+}
