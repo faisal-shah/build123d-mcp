@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.71
+
+### Changed
+
+- **`b123d-repair` skill: Rung 4 gains a triangulated micro-face-patch escalation, and Rung 3 gains explicit "kill it, don't wait it out" guidance.** Deep-diving the full run history of the hardest recurring CADGenBench fixture found two independent past sessions that succeeded on a defect this skill's shipped ladder currently fails on (option 1 rebuild-from-wire, then option 2 `BRepFill_Filling`, both genuinely uncooperative on this specific BSpline face) — both escalated to a technique not yet in the skill: tessellate the malformed face and rebuild it as many small *planar* triangular faces instead of one surface, then sew at increasing tolerance until it closes. Flat triangles can't be non-planar or unorientable, so this sidesteps the underlying pathology entirely, at the cost of a small, tessellation-tolerance-bounded shape error — the first Rung 4 option that isn't geometry-exact, positioned after the exact options and before the destructive drop+sew/cutout ones. Verified on a synthetic curved face via a real STEP round-trip: valid B-rep, 0.03% volume delta. Separately, both successful sessions also killed a hung `BRepAlgoAPI_Defeaturing` call within seconds and moved on, while a same-defect failure let a standalone defeature script run well past its own timeout window before giving up — Rung 3 now says explicitly not to wait out a stuck defeature, in-session or standalone.
+
 ## v0.3.70
 
 ### Changed

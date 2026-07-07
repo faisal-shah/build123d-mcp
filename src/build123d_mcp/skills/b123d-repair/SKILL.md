@@ -210,6 +210,17 @@ defeaturing can silently produce a degenerate shape on a genuinely
 non-planar/complex face, not just run slowly or need a longer timeout. Don't
 retry with different tolerances; move to rung 4.
 
+**If it's just slow, don't wait it out — kill it and move on.** A stubborn
+face's `Build()` can run past the `execute()` timeout in-session, and running
+it as a standalone script (Step 5) can *also* run for many minutes with no
+output. Give a standalone attempt one bounded check (a `ps`/timeout, not open-
+ended watching); a defeature that hasn't finished by then is exactly as
+diagnostic as one that returned a bad result — kill the process and move to
+rung 4 rather than continuing to wait. Field evidence: on the same class of
+defect, sessions that killed a hung defeature within seconds and escalated
+had budget left to reach a working repair; a session that let a standalone
+defeature run past its timeout window before giving up did not.
+
 ### Rung 4 — face surgery for an unorientable sliver
 
 Thin sliver faces (a degenerate fillet remnant, a band between near-coincident
@@ -289,7 +300,53 @@ these, in order:
    healed = as_solid(sew.SewedShape())
    ```
 
-3. **Drop + tolerant sew.** When the wire itself is broken (both options above
+3. **Replace with a triangulated micro-face patch.** When option 2 *also*
+   fails to produce a valid filled face (a genuinely uncooperative BSpline
+   that resists reconstruction as one surface), stop trying to rebuild it as
+   a single surface — tessellate the bad face and rebuild it as many small
+   *planar* triangular faces instead. Flat triangles can't be non-planar or
+   unorientable, so this sidesteps the underlying pathology entirely, at the
+   cost of faceting the small patch area (a bounded, tessellation-tolerance-
+   sized shape error, not the near-zero delta the earlier options give — this
+   is the first option in this rung that isn't a geometry-exact repair):
+
+   ```python
+   from OCP.BRepBuilderAPI import BRepBuilderAPI_MakePolygon, BRepBuilderAPI_MakeFace, BRepBuilderAPI_Sewing
+   from OCP.BRepCheck import BRepCheck_Analyzer
+   from OCP.gp import gp_Pnt
+   verts, tris = bad_face.tessellate(0.1)
+   tri_faces = []
+   for a, b, c in tris:
+       pa, pb, pc = verts[a], verts[b], verts[c]
+       poly = BRepBuilderAPI_MakePolygon(gp_Pnt(pa.X, pa.Y, pa.Z), gp_Pnt(pb.X, pb.Y, pb.Z), gp_Pnt(pc.X, pc.Y, pc.Z), True)
+       mk = BRepBuilderAPI_MakeFace(poly.Wire())
+       if mk.IsDone():
+           tri_faces.append(mk.Face())   # skip degenerate triangles silently
+   healed = None
+   for tol in (0.005, 0.05, 0.1, 0.25):   # start small; widen only if it doesn't close
+       sew = BRepBuilderAPI_Sewing(tol)
+       for f in part.faces():
+           if not f.wrapped.IsSame(bad_face.wrapped):
+               sew.Add(f.wrapped)
+       for tf in tri_faces:
+           sew.Add(tf)
+       sew.Perform()
+       candidate = as_solid(sew.SewedShape())
+       if BRepCheck_Analyzer(candidate.wrapped).IsValid():
+           healed = candidate
+           break
+   if healed is None:
+       raise RuntimeError("triangulated patch never closed — move to option 4")
+   ```
+
+   Sweep the sew tolerance rather than committing to one value — which
+   tolerance closes the gap depends on how coarse the tessellation came out,
+   and is not worth predicting up front. Verify with the volume/bbox check as
+   usual, but hold this option to a looser bar: a delta on the order of the
+   bad face's own area times the tessellation deflection is expected and
+   acceptable here, not a red flag the way it would be for options 1-2.
+
+4. **Drop + tolerant sew.** When the wire itself is broken (options above
    fail), delete the face entirely and sew the neighbours with **tolerance
    greater than the sliver's width** (e.g. 0.6 mm for a 0.5 mm sliver), then
    `ShapeFix_Solid` to orient the shell:
@@ -304,11 +361,11 @@ these, in order:
    healed = as_solid(sew.SewedShape())        # sewn result is a Shell; as_solid orients it
    ```
 
-4. **Patch + small-tolerance sew.** On a *wide* sliver (~2-3 mm), drop+sew
+5. **Patch + small-tolerance sew.** On a *wide* sliver (~2-3 mm), drop+sew
    goes non-manifold (the big tolerance welds faces that shouldn't meet).
    Instead fill the sliver's boundary wire with a filling face and re-sew at
    small tolerance (option 2's two snippets, in order).
-5. **Cut it out.** When the sliver is intrinsic to the geometry (a curved band
+6. **Cut it out.** When the sliver is intrinsic to the geometry (a curved band
    between two near-coincident arcs), in-memory fixes only *fake-heal* — the
    gate fails again after the export round-trip. Remove the region physically:
    boolean-subtract a thin box enclosing the sliver. This changes geometry by
