@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.71
+
+### Fixed
+
+- **`locate_gate_defects()` can now localize mesh-open-edge defects — it never could before.** The tool's docstring and the `b123d-repair` skill both describe it as returning 3D coordinates for any gate defect class, but the implementation only ever checked for mesh non-manifold edges and non-manifold vertices — there was no open-edge check at all, despite `mesh_open_edges` being one of the gate's most common failure reasons and the exact welded-triangle data needed for it already being computed for the other two checks. Field evidence: a CADGenBench editing fixture hit a mesh-only gate failure (6 open edges, B-rep otherwise valid) with no co-located BRepCheck defect; `locate_gate_defects()` came back empty ("no structural defects"), so the agent spent roughly a dozen `execute()` calls trying generic fixes (wider sew tolerance, triangulation-cache cleaning, `ShapeFix_Solid`, `ShapeUpgrade_UnifySameDomain`) at the wrong location before hand-rolling a full `BRepMesh_IncrementalMesh` triangulation pass from scratch to find the real defect elsewhere in the part. Added `_mesh_open_edges()` — the same coordinate-weld mesh already built for the non-manifold checks, now also counting edges shared by exactly 1 triangle (an unclosed tessellated boundary) instead of only >2 (a self-touch) — wired into `collect_defects()` alongside the existing checks. Like the non-manifold checks it sits next to, this uses a coordinate weld rather than the gate's own exact topology-stitched algorithm, so it's a starting point to inspect, not a guaranteed 1:1 match to the gate's count — the docstrings for both `locate_gate_defects()` and the new function say so explicitly. Verified against a genuinely open 5-faced box shell (the same construction the existing exact-mesh-check test suite already uses for this defect class): correctly locates all 4 rim edges of the missing face, and reports zero on a valid closed box (no false positives).
+
 ## v0.3.70
 
 ### Changed
