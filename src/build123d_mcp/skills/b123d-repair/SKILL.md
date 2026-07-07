@@ -60,6 +60,84 @@ Do not apply repairs blind. First identify the defect class and its location.
 Try each rung in order; verify with Step 2 after every attempt; stop at the
 first rung whose result passes the export gate.
 
+Every rung below wraps its raw OCCT result with `as_solid()`, not a bare
+`Part(...)` call — `Part(raw_shape)` has been observed to silently report
+`volume=0` on a genuinely healed shape (`IsDone()` True, geometry fine), and a
+bare `Solid(raw_shape)` throws `Standard_TypeMismatch` whenever the shape is a
+`Compound` rather than a plain `Solid` — which is the normal case for anything
+built with build123d's own operators (even a plain `Box()`), not just imported
+STEP files. Define this once and reuse it for every rung:
+
+```python
+from OCP.TopAbs import TopAbs_SOLID, TopAbs_SHELL, TopAbs_COMPOUND
+from OCP.TopoDS import TopoDS, TopoDS_Iterator
+from OCP.ShapeFix import ShapeFix_Solid
+
+def as_solid(shape):
+    """Wrap a raw TopoDS_Shape (Solid, Compound, or sewn Shell) with a correct volume."""
+    st = shape.ShapeType()
+    if st == TopAbs_SOLID:
+        return Solid(TopoDS.Solid_s(shape))
+    if st == TopAbs_SHELL:
+        return Solid(ShapeFix_Solid().SolidFromShell(TopoDS.Shell_s(shape)))
+    if st != TopAbs_COMPOUND:
+        raise RuntimeError(f"no solid or shell found in shape of type {st}")
+
+    # Walk direct children only (TopoDS_Iterator, not a recursive TopExp_Explorer),
+    # recursing into nested compounds — so a solid sitting next to a stray shell/
+    # face is rejected as mixed content instead of silently ignored.
+    solids, shells, mixed = [], [], False
+    stack = [shape]
+    while stack:
+        it = TopoDS_Iterator(stack.pop())
+        while it.More():
+            child = it.Value()
+            cst = child.ShapeType()
+            if cst == TopAbs_SOLID:
+                solids.append(TopoDS.Solid_s(child))
+            elif cst == TopAbs_COMPOUND:
+                stack.append(child)
+            elif cst == TopAbs_SHELL:
+                shells.append(TopoDS.Shell_s(child))
+            else:
+                mixed = True
+            it.Next()
+
+    if mixed or (solids and shells):
+        raise RuntimeError(f"mixed topology in a {st} — expected only solids or only shells")
+    if len(solids) == 1:
+        return Solid(solids[0])
+    if len(solids) > 1:
+        raise RuntimeError(
+            f"expected 1 solid, found {len(solids)} in a {st} — "
+            "the operation likely didn't fully merge"
+        )
+    if len(shells) == 1:
+        return Solid(ShapeFix_Solid().SolidFromShell(shells[0]))
+    if len(shells) > 1:
+        raise RuntimeError(
+            f"expected 1 shell, found {len(shells)} in a {st} — sewing likely split the part"
+        )
+
+    raise RuntimeError(f"no solid or shell found in shape of type {st}")
+```
+
+Never silently pick a solid/shell out of several, and never ignore other
+topology sitting alongside one — a compound with more than one solid/shell, or
+a mix of a solid plus a stray shell/face, almost always means the operation
+didn't fully merge or a sew split the part, and picking one candidate
+arbitrarily reintroduces the exact silent-partial-volume bug this helper
+exists to eliminate. Sanity-check the wrapped result's volume against the
+pre-heal volume every time regardless — whichever wrapper you use, a wrapping
+bug or a genuinely bad heal both show up the same way (a wrong or zero
+volume), so the check is what actually tells them apart.
+
+Because build123d-mcp's `execute()` namespace persists across calls, a rung
+whose attempt raises does **not** clear a previous rung's `healed` — reassign
+`healed = None` before each attempt and check `healed is not None` before
+trusting it, rather than assuming a bare reference reflects the rung you just
+tried.
+
 ### Rung 1 — `ShapeFix_Shape` (seconds, non-destructive)
 
 Fixes reversed faces (a boolean can flip a distant face — e.g. a hole-bottom
@@ -70,7 +148,7 @@ elsewhere on an imported shape.
 from OCP.ShapeFix import ShapeFix_Shape
 fix = ShapeFix_Shape(part.wrapped)
 fix.Perform()
-healed = Part(fix.Shape())
+healed = as_solid(fix.Shape())
 ```
 
 Fails when: the face is genuinely unorientable (its own wire is inconsistent) —
@@ -101,7 +179,7 @@ Cautions, both observed in the field:
   from OCP.BRepAlgoAPI import BRepAlgoAPI_Fuse
   op = BRepAlgoAPI_Fuse(part.solids()[0].wrapped, tool.wrapped)
   op.Build()
-  healed = Part(op.Shape())
+  healed = as_solid(op.Shape())
   ```
 
 ### Rung 3 — defeature the malformed face
@@ -113,23 +191,14 @@ without plugging.
 
 ```python
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Defeaturing
-from OCP.TopoDS import TopoDS
 df = BRepAlgoAPI_Defeaturing()
 df.SetShape(part.wrapped)
 df.AddFaceToRemove(bad_face.wrapped)
 df.Build()
-healed = Solid(TopoDS.Solid_s(df.Shape()))   # NOT Part(df.Shape()) — see below
+healed = as_solid(df.Shape())
 ```
 
-**Wrap the result in `Solid`, not `Part`.** `Part(df.Shape())` has been
-observed, on a real defeatured shape, to silently report `volume=0` even
-though `IsDone()` is True and the geometry is genuinely fine — the wrapper is
-broken, not the operation. `Solid(TopoDS.Solid_s(df.Shape()))` recovers the
-correct volume on the identical shape. Whichever wrapper you use, sanity-check
-the result's volume against the pre-heal volume before concluding anything
-about whether the defeature itself worked.
-
-**Volume check is mandatory too**: defeaturing can silently *fill an internal
+**Volume check is mandatory**: defeaturing can silently *fill an internal
 bore* whose wall included the removed face (observed: +14% volume — a ruined
 part that passed the gate). Accept the heal only if the volume delta is on the
 scale of the defect itself, not of a feature.
@@ -149,57 +218,77 @@ these, in order:
 
 1. **Rebuild directly from the face's own wire, if planar.** The cheapest,
    most literal fix — zero geometry change, since the boundary itself is
-   untouched:
+   untouched. Rebuild from the *outer* wire and re-add any inner wires
+   explicitly — a face with a hole has more than one wire, and grabbing only
+   "a" wire silently drops the others (verified: doing that on a plate with a
+   drilled hole rebuilds a solid plate, `IsDone()` True, hole gone, no error):
 
    ```python
    from OCP.BRepBuilderAPI import BRepBuilderAPI_MakeFace
    from OCP.BRepTools import BRepTools_ReShape
-   from OCP.TopExp import TopExp_Explorer
-   from OCP.TopAbs import TopAbs_WIRE
-   from OCP.TopoDS import TopoDS
-   wire = TopoDS.Wire_s(TopExp_Explorer(bad_face.wrapped, TopAbs_WIRE).Current())
-   mk = BRepBuilderAPI_MakeFace(wire, True)
-   if mk.IsDone():
-       reshaper = BRepTools_ReShape()
-       reshaper.Replace(bad_face.wrapped, mk.Face())
-       healed = Solid(TopoDS.Solid_s(reshaper.Apply(part.wrapped)))
+   outer = bad_face.outer_wire()
+   inner_wires = [w for w in bad_face.wires() if not w.wrapped.IsSame(outer.wrapped)]
+   mk = BRepBuilderAPI_MakeFace(outer.wrapped, True)
+   if not mk.IsDone():
+       raise RuntimeError("MakeFace failed — non-planar wire, move to option 2")
+   for w in inner_wires:
+       mk.Add(w.wrapped)
+   reshaper = BRepTools_ReShape()
+   reshaper.Replace(bad_face.wrapped, mk.Face())
+   healed = as_solid(reshaper.Apply(part.wrapped))
    ```
 
-   Only works when the wire is (at least close to) planar — on a genuinely
-   non-planar/BSpline surface `MakeFace` raises `Standard_Failure ... NULL
-   shape` (or `IsDone()` is False). That failure **is** the signal to move to
-   option 2, not a reason to retry this one.
+   Check `IsDone()` right after constructing `mk`, **before** adding any inner
+   wires — calling `.Add()` on a builder that already failed doesn't raise a
+   catchable exception, it segfaults the whole process (verified: reproduced
+   directly on a non-planar wire, exit code 139). Only works when the wire is
+   (at least close to) planar — on a genuinely non-planar/BSpline surface
+   `MakeFace` raises `Standard_Failure ... NULL shape`, or `IsDone()` is False
+   and the `raise` above fires before any `.Add()` call is reached. That
+   failure **is** the signal to move to option 2, not a reason to retry this
+   one.
 2. **Fill the boundary with a new surface.** For a non-planar face, build a
    fresh surface spanning the *same* wire's edges instead of assuming
    planarity — `BRepFill_Filling`, adding every edge of the wire, handles an
    arbitrary N-edge boundary (a plain `BRepFill` ruled face only spans exactly
    2 edges — use that simpler form only when the sliver truly has just 2 long
-   bounding edges):
+   bounding edges). This still needs the wire itself to be intact (its edges
+   form a closed loop) — only the *surface* is assumed garbage; if the wire is
+   also broken, `filling.IsDone()` comes back False here too, and that's the
+   signal to move to option 3, not to retry with different edge-continuity
+   settings:
 
    ```python
    from OCP.BRepFill import BRepFill_Filling
    from OCP.GeomAbs import GeomAbs_C0
-   from OCP.TopExp import TopExp_Explorer
-   from OCP.TopAbs import TopAbs_EDGE
-   from OCP.TopoDS import TopoDS
    from OCP.BRepTools import BRepTools_ReShape
-   edges, exp = [], TopExp_Explorer(bad_face.wrapped, TopAbs_EDGE)
-   while exp.More():
-       edges.append(TopoDS.Edge_s(exp.Current())); exp.Next()
    filling = BRepFill_Filling()
-   for e in edges:
-       filling.Add(e, GeomAbs_C0, True)
+   for e in bad_face.edges():
+       filling.Add(e.wrapped, GeomAbs_C0, True)
    filling.Build()
+   if not filling.IsDone():
+       raise RuntimeError("BRepFill_Filling failed — wire itself is broken, move to option 3")
    reshaper = BRepTools_ReShape()
    reshaper.Replace(bad_face.wrapped, filling.Face())
-   healed = Solid(TopoDS.Solid_s(reshaper.Apply(part.wrapped)))
+   healed = as_solid(reshaper.Apply(part.wrapped))
    ```
 
    `filling.IsDone()` can be True while `BRepCheck_Analyzer` still reports the
    raw filled face invalid — that's expected here; verify via a full re-sew
-   (next) and the export gate, not the raw face check. A follow-up re-sew of
+   (below) and the export gate, not the raw face check. A follow-up re-sew of
    every face at a small tolerance (0.005-0.05 mm) after the patch often
-   closes the residual gap the fill alone leaves.
+   closes the residual gap the fill alone leaves — start small and only widen
+   the tolerance if it doesn't close:
+
+   ```python
+   from OCP.BRepBuilderAPI import BRepBuilderAPI_Sewing
+   sew = BRepBuilderAPI_Sewing(0.01)   # small tol — widen toward 0.05mm if needed
+   for f in healed.faces():
+       sew.Add(f.wrapped)
+   sew.Perform()
+   healed = as_solid(sew.SewedShape())
+   ```
+
 3. **Drop + tolerant sew.** When the wire itself is broken (both options above
    fail), delete the face entirely and sew the neighbours with **tolerance
    greater than the sliver's width** (e.g. 0.6 mm for a 0.5 mm sliver), then
@@ -207,22 +296,18 @@ these, in order:
 
    ```python
    from OCP.BRepBuilderAPI import BRepBuilderAPI_Sewing
-   from OCP.ShapeFix import ShapeFix_Solid
-   from OCP.TopoDS import TopoDS
    sew = BRepBuilderAPI_Sewing(0.6)          # tol > sliver width
    for f in part.faces():
        if not f.wrapped.IsSame(bad_face.wrapped):
            sew.Add(f.wrapped)
    sew.Perform()
-   shell = TopoDS.Shell_s(sew.SewedShape())       # sewn result -> TopoDS_Shell
-   solid = ShapeFix_Solid().SolidFromShell(shell)  # orient into a proper solid
-   healed = Solid(solid)
+   healed = as_solid(sew.SewedShape())        # sewn result is a Shell; as_solid orients it
    ```
 
 4. **Patch + small-tolerance sew.** On a *wide* sliver (~2-3 mm), drop+sew
    goes non-manifold (the big tolerance welds faces that shouldn't meet).
-   Instead fill the sliver's boundary wire with a filling face (option 2) and
-   sew at small tolerance.
+   Instead fill the sliver's boundary wire with a filling face and re-sew at
+   small tolerance (option 2's two snippets, in order).
 5. **Cut it out.** When the sliver is intrinsic to the geometry (a curved band
    between two near-coincident arcs), in-memory fixes only *fake-heal* — the
    gate fails again after the export round-trip. Remove the region physically:
@@ -248,13 +333,18 @@ the same way.
   huge shape `validate()`'s own mesh check can come back `mesh_check: "skipped"`
   (too large to stitch even out-of-process) with a "not verified" warning, so
   treat its PASS as a screen, not a verdict.
-- **A heal must not change the geometry — but it must change *something*.**
-  Compare `volume` and bounding box before/after: the acceptable delta is the
-  scale of the defect (a sliver's near-zero volume), never a feature's. A heal
-  that gains or loses real volume replaced your part with a different part.
-  Conversely, `show()`'s own "shape was rebound but volume/topology/bbox
-  unchanged" warning means the attempt changed nothing at all — a rewrap, not
-  a repair — so the original defect is still there even though no error was
+- **A heal must not change the geometry — except when it's designed not to.**
+  Compare `volume` and bounding box before/after: for most rungs the
+  acceptable delta is the scale of the defect (a sliver's near-zero volume),
+  never a feature's, and a heal that gains or loses real volume replaced your
+  part with a different part. Rung 4 option 1 is the deliberate exception — it
+  rebuilds a face from its own existing wire, so volume/topology/bbox are
+  *supposed* to come back identical; there, `show()`'s "shape was rebound but
+  volume/topology/bbox unchanged" warning is expected and does not mean the
+  heal failed, so judge that option by whether the export gate now passes,
+  not by whether anything numeric changed. For every other rung, that same
+  warning does mean the attempt changed nothing at all — a rewrap, not a
+  repair — so the original defect is still there even though no error was
   raised; move to the next rung rather than trusting it.
 - **Never keep iterating on an invalid solid.** If a rung's attempt fails the
   gate, `restore_snapshot()` back to the pre-attempt state before trying the
