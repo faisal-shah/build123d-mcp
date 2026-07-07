@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "build123d-mcp": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "build123d-mcp"]
+    }
+  }
+}
