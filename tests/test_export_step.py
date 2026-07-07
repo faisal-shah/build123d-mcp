@@ -3,19 +3,29 @@
 build123d 0.11.0's high-level ``export_step`` (the ``STEPCAFControl_Writer`` path)
 raises ``RuntimeError: Failed to write STEP file`` on many imported-STEP-derived
 solids that 0.10.0 wrote fine — it hit ~38% of editing-fixture benchmark runs.
-``_write_step`` first retries through a ``Compound`` wrapper (which keeps the CAF
-path working, so names/colours survive), then falls back to the basic
-``STEPControl_Writer`` (geometry only). These tests pin the happy path, the
-forced fallback (high-level writer made to raise, so it runs on any version), and
-the real reimported-solid regression.
+``_write_step`` accepts high-level output only when single-solid files are flat,
+then falls back to the basic ``STEPControl_Writer`` (geometry only). These tests
+pin the happy path, the forced fallback (high-level writer made to raise, so it
+runs on any version), the real reimported-solid regression, and the high-level
+success path that can still write a one-component assembly.
 """
 
 import pytest
-from build123d import import_step
+from build123d import Color, import_step
 
 from build123d_mcp.session import Session
 from build123d_mcp.tools.execute import execute_code
 from build123d_mcp.tools.export import export_file
+
+
+def assert_no_assembly_links(step_path):
+    assert "NEXT_ASSEMBLY_USAGE_OCCURRENCE" not in step_path.read_text(errors="ignore")
+
+
+def assert_step_has_label_and_colour(step_path, label):
+    text = step_path.read_text(errors="ignore")
+    assert label in text
+    assert "COLOUR_RGB" in text or "DRAUGHTING_PRE_DEFINED_COLOUR" in text
 
 
 @pytest.fixture
@@ -144,10 +154,106 @@ def test_export_single_solid_is_not_written_as_assembly(tmp_path):
     export_step(Box(10, 10, 10), str(seed))
     s = import_step(str(seed))  # bare Solid, label 'COMPOUND' — the #1356 trigger
     s.label = "widget"
+    s.color = Color(1, 0, 0)
 
     out = tmp_path / "out.step"
     _write_step(s, str(out))
 
-    text = out.read_text(errors="ignore")
-    assert "NEXT_ASSEMBLY_USAGE_OCCURRENCE" not in text  # single product, not an assembly
-    assert "widget" in text  # name survived (not dropped to the raw geometry writer)
+    assert_no_assembly_links(out)  # single product, not an assembly
+    assert_step_has_label_and_colour(out, "widget")
+    back = import_step(str(out))
+    assert len(back.solids()) == 1
+    assert back.volume == pytest.approx(1000.0, rel=1e-3)
+
+
+def test_export_fresh_single_solid_wrapper_is_not_written_as_assembly(
+    session, tmp_path, monkeypatch
+):
+    """build123d's high-level writer can return success while still emitting a
+    one-component assembly for fresh one-solid wrappers such as located
+    primitives. That is not the #1356 exception path, so export() must inspect the
+    written file and rewrite it flat.
+    """
+
+    monkeypatch.chdir(tmp_path)
+    execute_code(session, "show(Pos(5, 0, 0) * Cylinder(2, 10), 'pin')")
+    session.objects["pin"].color = Color(1, 0, 0)
+
+    export_file(session, "pin", "step", object_name="pin")
+
+    out = tmp_path / "pin.step"
+    assert_no_assembly_links(out)
+    assert_step_has_label_and_colour(out, "pin")
+    back = import_step(str(out))
+    bbox = back.bounding_box()
+    assert len(back.solids()) == 1
+    assert back.volume == pytest.approx(session.objects["pin"].volume, rel=1e-3)
+    assert bbox.min.X == pytest.approx(3.0)
+    assert bbox.max.X == pytest.approx(7.0)
+
+
+def test_export_fresh_part_wrapper_is_not_written_as_assembly(session, tmp_path, monkeypatch):
+    """Part wrappers can also take the high-level success path; keep the same
+    flat-file invariant for them so the fix is not limited to primitives.
+    """
+
+    monkeypatch.chdir(tmp_path)
+    execute_code(session, "show(Pos(5, 0, 0) * (Part() + Box(10, 10, 10)), 'part')")
+    session.objects["part"].color = Color(1, 0, 0)
+
+    export_file(session, "part", "step", object_name="part")
+
+    out = tmp_path / "part.step"
+    assert_no_assembly_links(out)
+    assert_step_has_label_and_colour(out, "part")
+    back = import_step(str(out))
+    bbox = back.bounding_box()
+    assert len(back.solids()) == 1
+    assert back.volume == pytest.approx(1000.0, rel=1e-3)
+    assert bbox.min.X == pytest.approx(0.0)
+    assert bbox.max.X == pytest.approx(10.0)
+
+
+def test_export_rewrites_successful_single_solid_assembly_export(session, tmp_path, monkeypatch):
+    """Pin the invariant independent of build123d's current writer behavior:
+    even if the high-level writer reports success with a one-component assembly,
+    the final single-solid STEP must be flat.
+    """
+
+    from build123d import Compound
+    from build123d import export_step as real_export_step
+
+    monkeypatch.chdir(tmp_path)
+    execute_code(session, "show(Box(10, 10, 10), 'part')")
+
+    def write_one_component_assembly(shape, file_path, *args, **kwargs):
+        return real_export_step(Compound(children=[shape]), file_path, *args, **kwargs)
+
+    monkeypatch.setattr("build123d.export_step", write_one_component_assembly)
+
+    export_file(session, "part", "step", object_name="part")
+
+    out = tmp_path / "part.step"
+    assert_no_assembly_links(out)
+    back = import_step(str(out))
+    assert len(back.solids()) == 1
+    assert back.volume == pytest.approx(1000.0, rel=1e-3)
+
+
+def test_export_multi_solid_compound_keeps_assembly_structure(session, tmp_path, monkeypatch):
+    """The single-solid flat-file invariant must not flatten real multi-body
+    assemblies.
+    """
+
+    monkeypatch.chdir(tmp_path)
+    execute_code(
+        session,
+        "show(Compound(children=[Box(10, 10, 10), Pos(20, 0, 0) * Box(10, 10, 10)]), 'asm')",
+    )
+
+    export_file(session, "asm", "step", object_name="asm")
+
+    out = tmp_path / "asm.step"
+    assert "NEXT_ASSEMBLY_USAGE_OCCURRENCE" in out.read_text(errors="ignore")
+    reimported = import_step(str(out))
+    assert len(reimported.solids()) == 2

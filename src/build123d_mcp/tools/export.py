@@ -97,6 +97,48 @@ def _write_svg(shape, abs_path: str) -> None:
     exporter.write(abs_path)
 
 
+def _n_solids(shape) -> int:
+    try:
+        return len(shape.solids())
+    except Exception:  # noqa: BLE001 - no solid topology to reason about
+        return 0
+
+
+def _raw_step_write(shape, abs_path: str, *, single_solid: bool = False) -> bool:
+    from OCP.IFSelect import IFSelect_ReturnStatus
+    from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
+
+    transfer_shape = shape.solids()[0] if single_solid else shape
+    writer = STEPControl_Writer()
+    writer.Transfer(transfer_shape.wrapped, STEPControl_AsIs)
+    return writer.Write(abs_path) == IFSelect_ReturnStatus.IFSelect_RetDone
+
+
+def _single_solid_step_is_flat(abs_path: str, n_solids: int) -> bool:
+    return n_solids != 1 or _nauo_count(abs_path) == 0
+
+
+def _flat_single_solid_copy(shape):
+    """Return one located solid as identity-location geometry for flat CAF STEP."""
+    from build123d import Solid
+    from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
+    from OCP.TopLoc import TopLoc_Location
+
+    solid = shape.solids()[0]
+    wrapped = solid.wrapped
+    loc = wrapped.Location()
+    if not loc.IsIdentity():
+        wrapped = BRepBuilderAPI_Transform(wrapped, loc.Transformation(), True, True).Shape()
+        wrapped.Location(TopLoc_Location())
+
+    recon = Solid(wrapped)
+    recon.label = getattr(shape, "label", "") or ""
+    color = getattr(shape, "color", None)
+    if color is not None:
+        recon.color = color
+    return recon
+
+
 def _write_step(shape, abs_path: str) -> None:
     """Write a STEP, working around build123d's high-level writer failing.
 
@@ -114,44 +156,41 @@ def _write_step(shape, abs_path: str) -> None:
     import blank in a stock document. Mesh viewers hide this because they flatten
     product structure, so it only bites in a real kernel.
 
-    #1356 is about the build123d ``Solid`` wrapper, not the geometry: a fresh
-    ``Solid`` over the same ``TopoDS`` gets the CAF writer to accept it and stays a
-    single product with the name intact. So for one solid we reconstruct and retry;
-    a genuine multi-solid keeps its ``Compound``, where the assembly structure is
-    correct. Raw ``STEPControl_Writer`` is the last resort — single product, but
-    drops CAF names/colours.
+    #1356 is about the build123d ``Solid`` wrapper, not the geometry. For one
+    solid, accept the CAF writer only when the written file is actually flat
+    (no ``NEXT_ASSEMBLY_USAGE_OCCURRENCE``); otherwise bake any location into the
+    one solid and retry the CAF writer so names/colours survive. A genuine
+    multi-solid keeps its ``Compound``, where the assembly structure is correct.
+    Raw ``STEPControl_Writer`` is the last resort — single product, but drops CAF
+    names/colours.
     """
     from build123d import export_step
 
+    n_solids = _n_solids(shape)
+
     try:
         export_step(shape, abs_path)
-        return
+        if _single_solid_step_is_flat(abs_path, n_solids):
+            return
     except Exception:  # noqa: BLE001 - CAF writer failed; work around #1356 below
         pass
 
-    try:
-        n_solids = len(shape.solids())
-    except Exception:  # noqa: BLE001 - no solid topology to reason about
-        n_solids = 0
-
     if n_solids == 1:
-        # Single part: reconstruct the ``Solid`` so the CAF writer takes it. Keeps
-        # the file a single product (no phantom ``NEXT_ASSEMBLY_USAGE_OCCURRENCE``)
-        # and the name/colour. Reconstructing from ``.wrapped`` does not touch
-        # ``shape``, so unlike the ``Compound`` wrap below there is no parent to
-        # save/restore.
-        from build123d import Solid
-
+        # Single part: reconstruct the ``Solid`` so the CAF writer takes
+        # import-derived solids, and bake non-identity locations into the geometry
+        # so fresh located wrappers do not become one-component assemblies.
         try:
-            recon = Solid(shape.solids()[0].wrapped)
-            recon.label = getattr(shape, "label", "") or ""
-            color = getattr(shape, "color", None)
-            if color is not None:
-                recon.color = color
+            recon = _flat_single_solid_copy(shape)
             export_step(recon, abs_path)
-            return
+            if _single_solid_step_is_flat(abs_path, n_solids):
+                return
         except Exception:  # noqa: BLE001 - fall through to the raw writer
             pass
+
+        if _raw_step_write(shape, abs_path, single_solid=True) and _single_solid_step_is_flat(
+            abs_path, n_solids
+        ):
+            return
     else:
         # Genuine multi-solid: a ``Compound`` is the right structure, and wrapping
         # also gets it through #1356 with names intact. Constructing a ``Compound``
@@ -169,17 +208,14 @@ def _write_step(shape, abs_path: str) -> None:
         except Exception:  # noqa: BLE001 - raw geometry-only fallback
             pass
 
-    from OCP.IFSelect import IFSelect_ReturnStatus
-    from OCP.STEPControl import STEPControl_AsIs, STEPControl_Writer
+        if _raw_step_write(shape, abs_path):
+            return
 
-    writer = STEPControl_Writer()
-    writer.Transfer(shape.wrapped, STEPControl_AsIs)
-    if writer.Write(abs_path) != IFSelect_ReturnStatus.IFSelect_RetDone:
-        raise RuntimeError(
-            "Failed to write STEP file (build123d export_step, the single-solid "
-            "reconstruct retry / multi-solid Compound-wrap retry, and the raw "
-            "STEPControl_Writer fallback all failed)"
-        )
+    raise RuntimeError(
+        "Failed to write STEP file (build123d export_step, the single-solid "
+        "reconstruct retry / multi-solid Compound-wrap retry, and the raw "
+        "STEPControl_Writer fallback all failed)"
+    )
 
 
 def _write_one(shape, abs_path: str, fmt: str) -> None:
