@@ -146,42 +146,50 @@ extend-and-trim with one planar cut. For imported solids, prefer targeted solid
 repair over broad shape healing; global healing can reorient faces or collapse
 volume.
 
-**Extending an existing boss/cylindrical feature is a common instance of this
-trap, with a better fix than interpenetrating.** A boss has a constant
-cross-section, so unioning a new cylinder or tube on top of it — butt-joined or
-buried with overlap — often leaves the old seating face stuck as a duplicate
-internal face the fuse won't dissolve (`validate()` FAILs with "N mesh
-non-manifold edge(s) — faces meet >2-ways", or the two pieces stay separate
-solids). Extrude the boss's *own* end-cap face instead of adding a separately-
-built cylinder — a face extruded from the boss's own boundary shares the exact
+**Extending a boss, or relocating any planar/annular face along its own normal
+(raising a bore's counterbore opening, moving a shoulder) is a common instance
+of this trap, with a better fix than interpenetrating.** These features have a
+constant cross-section at the join, so unioning a new cylinder, tube or ring
+on top — butt-joined or buried with overlap — often leaves the old face stuck
+as a duplicate internal face the fuse won't dissolve (`validate()` FAILs with
+"N mesh non-manifold edge(s) — faces meet >2-ways", the two pieces stay
+separate solids, or a `validate()` PASS is followed by an `export()` failure
+after the STEP round-trip re-checks orientation on the old face's remnants).
+Extrude the feature's *own* face instead of adding a separately-built
+primitive — a face extruded from the part's own boundary shares the exact
 underlying geometry, so a follow-up fuse dissolves it cleanly where a
-coincidentally-matching new primitive would not:
+coincidentally-matching new primitive would not, even when it's positioned to
+match exactly:
 
-- **One-sided** (extend toward a target on one end only): `BRepFeat_MakePrism`
-  turns the seating face into a prism *feature* that extends the existing
-  topology in place, so there is no second solid to fuse at all:
+- **One-sided** (extend/relocate toward a target on one end only — the more
+  common case): `BRepFeat_MakePrism` turns the face into a prism *feature*
+  that extends the existing topology in place, so there is no second solid to
+  fuse at all:
 
   ```python
   from OCP.BRepFeat import BRepFeat_MakePrism
   from OCP.gp import gp_Dir
-  # seat = the boss's planar end-cap face (an annulus if it has a coaxial bore)
+  # seat = the planar face to move (an annulus if it rims a bore or coaxial hole)
   mk = BRepFeat_MakePrism(part.wrapped, seat.wrapped, seat.wrapped, gp_Dir(0, 0, 1), 1, True)
-  mk.Perform(delta)  # delta = distance to extend along the axis
+  mk.Perform(delta)  # delta = distance to move along the axis
   extended = Solid(mk.Shape())
   ```
 
-- **Symmetric** (both ends grow by the same amount): no raw OCCT needed —
-  `extrude()` each end-cap face along its own normal by half the total growth,
-  then fuse:
+- **Symmetric** (both ends of a boss grow by the same amount): no raw OCCT
+  needed — `extrude()` each end-cap face along its own normal by half the
+  total growth, then fuse:
 
   ```python
   extension = extrude(seat, amount=delta)   # seat = one of the boss's end-cap faces
   extended = part.fuse(extension)           # repeat for the other end if both grow
   ```
 
-Either way, extruding the actual end-cap face preserves the exact cross-section
-— a coaxial bore extends along with the OD — so verify by re-measuring the
-boss's new end height/position, not just that `validate()` passed.
+Either way, extruding the actual face preserves the exact cross-section — a
+coaxial bore or hole extends along with the OD — so verify by re-measuring the
+moved face's new position, not just that `validate()` passed; a `validate()`
+PASS on this construction can still fail the stricter `export()` round-trip
+check, which is the signal to switch from add-and-fuse to this technique if
+you haven't already.
 
 Only if a single unavoidable operation (IsoThread, a multi-body fillet, a very
 high-face-count boolean) still can't fit, drop out of the session for that one op:
