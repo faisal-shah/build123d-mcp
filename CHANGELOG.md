@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.72
+
+### Changed
+
+- **`b123d-modeling` skill: prefer defeaturing over a broad boolean cut when removing a small feature.** Comparing per-fixture CADGenBench scores (not just validity) across several close-together mcp versions surfaced a fixture where every run agreed on the target fillet but split into two different construction techniques with very different outcomes: some runs cut it with a broad annular boolean and then had to fight `shape_compare`-flagged "non-local surface changes" from unrelated topology merges; others used `BRepAlgoAPI_Defeaturing` directly on the fillet's own face and had no such fighting. Verified head-to-head on a synthetic boss with a root fillet: the boolean cut removed 13× the fillet's own volume (its cutter profile doesn't match the fillet's exact geometry, so it also shaves the adjacent straight wall) and grew the face count from 9 to 13; defeaturing the exact torus face removed only the fillet's volume (matching the real fixture's observed delta to the mm³) and *reduced* the face count to 8, since neighbouring faces extend and merge instead of new ones being added. Added as the subtractive mirror of the existing "extending a boss" guidance, with the same tell: if a cut's volume delta is much larger than the feature you meant to remove, that mismatch is the signal to switch technique, not to trim the cutter's dimensions.
+
 ## v0.3.71
 
 ### Fixed

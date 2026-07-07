@@ -201,6 +201,33 @@ PASS on this construction can still fail the stricter `export()` round-trip
 check, which is the signal to switch from add-and-fuse to this technique if
 you haven't already.
 
+**Removing a small feature (a fillet, chamfer, or sliver) is the subtractive
+mirror of the same trap.** A boolean cut broad enough to reach the feature
+almost always removes more than the feature itself — the cutter's own profile
+rarely matches the feature's exact geometry, so it shaves material off
+adjacent faces too and can trigger unrelated topology merges elsewhere in the
+part. Defeature the exact face(s) instead — `BRepAlgoAPI_Defeaturing` removes
+only the named face and extends its neighbours to close the gap, changing
+nothing beyond the feature's own volume:
+
+```python
+from OCP.BRepAlgoAPI import BRepAlgoAPI_Defeaturing
+from OCP.TopoDS import TopoDS
+df = BRepAlgoAPI_Defeaturing()
+df.SetShape(part.wrapped)
+df.AddFaceToRemove(bad_face.wrapped)   # bad_face = the fillet/chamfer face itself
+df.Build()
+removed = Solid(TopoDS.Solid_s(df.Shape()))
+```
+
+Verified on a boss with a root fillet: a broad annular cut removed **13×** the
+fillet's own volume (it also shaved the adjacent straight boss wall) and grew
+the face count; defeaturing the exact torus face removed only the fillet's
+volume and *reduced* the face count, since the neighbouring faces extend and
+merge instead of adding new ones. If the volume delta from a cut is much
+larger than the feature you meant to remove, that mismatch is the signal to
+switch to this technique, not to trim the cutter's dimensions further.
+
 Only if a single unavoidable operation (IsoThread, a multi-body fillet, a very
 high-face-count boolean) still can't fit, drop out of the session for that one op:
 
