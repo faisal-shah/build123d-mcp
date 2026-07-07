@@ -69,9 +69,8 @@ built with build123d's own operators (even a plain `Box()`), not just imported
 STEP files. Define this once and reuse it for every rung:
 
 ```python
-from OCP.TopAbs import TopAbs_SOLID, TopAbs_SHELL
-from OCP.TopExp import TopExp_Explorer
-from OCP.TopoDS import TopoDS
+from OCP.TopAbs import TopAbs_SOLID, TopAbs_SHELL, TopAbs_COMPOUND
+from OCP.TopoDS import TopoDS, TopoDS_Iterator
 from OCP.ShapeFix import ShapeFix_Solid
 
 def as_solid(shape):
@@ -81,10 +80,31 @@ def as_solid(shape):
         return Solid(TopoDS.Solid_s(shape))
     if st == TopAbs_SHELL:
         return Solid(ShapeFix_Solid().SolidFromShell(TopoDS.Shell_s(shape)))
+    if st != TopAbs_COMPOUND:
+        raise RuntimeError(f"no solid or shell found in shape of type {st}")
 
-    solids, exp = [], TopExp_Explorer(shape, TopAbs_SOLID)
-    while exp.More():
-        solids.append(TopoDS.Solid_s(exp.Current())); exp.Next()
+    # Walk direct children only (TopoDS_Iterator, not a recursive TopExp_Explorer),
+    # recursing into nested compounds — so a solid sitting next to a stray shell/
+    # face is rejected as mixed content instead of silently ignored.
+    solids, shells, mixed = [], [], False
+    stack = [shape]
+    while stack:
+        it = TopoDS_Iterator(stack.pop())
+        while it.More():
+            child = it.Value()
+            cst = child.ShapeType()
+            if cst == TopAbs_SOLID:
+                solids.append(TopoDS.Solid_s(child))
+            elif cst == TopAbs_COMPOUND:
+                stack.append(child)
+            elif cst == TopAbs_SHELL:
+                shells.append(TopoDS.Shell_s(child))
+            else:
+                mixed = True
+            it.Next()
+
+    if mixed or (solids and shells):
+        raise RuntimeError(f"mixed topology in a {st} — expected only solids or only shells")
     if len(solids) == 1:
         return Solid(solids[0])
     if len(solids) > 1:
@@ -92,10 +112,6 @@ def as_solid(shape):
             f"expected 1 solid, found {len(solids)} in a {st} — "
             "the operation likely didn't fully merge"
         )
-
-    shells, exp = [], TopExp_Explorer(shape, TopAbs_SHELL)
-    while exp.More():
-        shells.append(TopoDS.Shell_s(exp.Current())); exp.Next()
     if len(shells) == 1:
         return Solid(ShapeFix_Solid().SolidFromShell(shells[0]))
     if len(shells) > 1:
@@ -106,13 +122,15 @@ def as_solid(shape):
     raise RuntimeError(f"no solid or shell found in shape of type {st}")
 ```
 
-Never silently pick a solid/shell out of several — a raw result with more than
-one almost always means the operation didn't fully merge or a sew split the
-part, and picking one arbitrarily reintroduces the exact silent-partial-volume
-bug this helper exists to eliminate. Sanity-check the wrapped result's volume
-against the pre-heal volume every time regardless — whichever wrapper you use,
-a wrapping bug or a genuinely bad heal both show up the same way (a wrong or
-zero volume), so the check is what actually tells them apart.
+Never silently pick a solid/shell out of several, and never ignore other
+topology sitting alongside one — a compound with more than one solid/shell, or
+a mix of a solid plus a stray shell/face, almost always means the operation
+didn't fully merge or a sew split the part, and picking one candidate
+arbitrarily reintroduces the exact silent-partial-volume bug this helper
+exists to eliminate. Sanity-check the wrapped result's volume against the
+pre-heal volume every time regardless — whichever wrapper you use, a wrapping
+bug or a genuinely bad heal both show up the same way (a wrong or zero
+volume), so the check is what actually tells them apart.
 
 Because build123d-mcp's `execute()` namespace persists across calls, a rung
 whose attempt raises does **not** clear a previous rung's `healed` — reassign
