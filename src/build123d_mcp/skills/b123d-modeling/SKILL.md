@@ -164,24 +164,34 @@ match exactly:
 - **One-sided** (extend/relocate toward a target on one end only — the more
   common case): `BRepFeat_MakePrism` turns the face into a prism *feature*
   that extends the existing topology in place, so there is no second solid to
-  fuse at all:
+  fuse at all. Take the direction from the seat's own normal — never hardcode
+  an axis, since a boss off the part's dominant axis (tilted, horizontal, on a
+  cast body) needs its own direction, and a wrong one silently collapses the
+  result to zero volume with `IsDone()` still True:
 
   ```python
   from OCP.BRepFeat import BRepFeat_MakePrism
   from OCP.gp import gp_Dir
   # seat = the planar face to move (an annulus if it rims a bore or coaxial hole)
-  mk = BRepFeat_MakePrism(part.wrapped, seat.wrapped, seat.wrapped, gp_Dir(0, 0, 1), 1, True)
+  n = seat.normal_at(seat.center())
+  mk = BRepFeat_MakePrism(part.wrapped, seat.wrapped, seat.wrapped, gp_Dir(n.X, n.Y, n.Z), 1, True)
   mk.Perform(delta)  # delta = distance to move along the axis
+  if not mk.IsDone():
+      raise RuntimeError("BRepFeat_MakePrism failed — seat face may not belong to part's topology")
   extended = Solid(mk.Shape())
   ```
 
-- **Symmetric** (both ends of a boss grow by the same amount): no raw OCCT
-  needed — `extrude()` each end-cap face along its own normal by half the
-  total growth, then fuse:
+- **Symmetric** (both ends of a boss grow by the same total amount): no raw
+  OCCT needed — `extrude()` each end-cap face along its own normal by half the
+  total growth, then fuse both onto the same running result (fusing the
+  second extension onto the original `part` instead of the already-extended
+  result would silently discard the first end's growth):
 
   ```python
-  extension = extrude(seat, amount=delta)   # seat = one of the boss's end-cap faces
-  extended = part.fuse(extension)           # repeat for the other end if both grow
+  half = delta / 2   # delta = TOTAL growth; each end grows by half
+  top_ext = extrude(top_seat, amount=half)       # top_seat, bottom_seat = the boss's two end-cap faces
+  bottom_ext = extrude(bottom_seat, amount=half)
+  extended = part.fuse(top_ext).fuse(bottom_ext)
   ```
 
 Either way, extruding the actual face preserves the exact cross-section — a
