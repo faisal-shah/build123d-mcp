@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.71
+
+### Changed
+
+- **`b123d-modeling` skill: a better fix for extending an existing boss/cylindrical feature.** The skill already warned that additive edits with exactly-coincident faces often fail to fuse; extending a boss (constant cross-section) is the single most common instance of this trap, and "interpenetrate slightly" is not the best available fix for it. Field evidence from a CADGenBench editing fixture (a hollow boss needing to reach a target height) showed an agent burn five different bridging/overlap variants — all failing with the same non-manifold or two-disjoint-solids error — before abandoning that boss for a different, easier target. The actual fix, already validated in two independent past sessions but never written into the shipped skill: extrude the boss's *own* end-cap face instead of adding a separately-built cylinder or tube. A face extruded from the boss's own boundary shares the exact underlying geometry with what it's fused against, so the boolean dissolves the shared boundary cleanly — a coincidentally-matching new primitive does not, even when perfectly positioned. Added both the one-sided technique (`BRepFeat_MakePrism` on the seating face, for "extend toward a target on one end") and the symmetric technique (`extrude()` each end-cap face by half the growth, then fuse, no raw OCCT needed) — both independently verified on a synthetic hollow boss (annular cross-section with a coaxial bore) against a real STEP round-trip: exact volume and height match, `BRepCheck_Analyzer` valid, hole preserved.
+
 ## v0.3.70
 
 ### Changed
