@@ -155,6 +155,37 @@ def _mesh_nonmanifold_edges(welded, coord) -> list:
     return out
 
 
+def _mesh_open_edges(welded, coord) -> list:
+    """Mesh edges shared by exactly 1 triangle (an unclosed tessellated boundary —
+    ``mesh_open_edges`` in the gate report), with midpoint. Same welded mesh as
+    ``_mesh_nonmanifold_edges``; a coordinate weld rather than the gate's own
+    topology-stitched exact check, so treat a location here as a starting point to
+    inspect, not a guaranteed match to the gate's count — re-check with the export
+    gate after any fix."""
+    from collections import Counter
+
+    edge_count: Counter = Counter()
+    for a, b, c in welded:
+        for e in ((a, b), (b, c), (a, c)):
+            edge_count[tuple(sorted(e))] += 1
+    out = []
+    for (a, b), n in edge_count.items():
+        if n == 1:
+            pa, pb = coord[a], coord[b]
+            mid = [round((pa[i] + pb[i]) / 2, 3) for i in range(3)]
+            out.append(
+                {
+                    "kind": "mesh_open_edge",
+                    "where": mid,
+                    "hint": (
+                        "unclosed tessellated boundary here — an unsewn or missing face; "
+                        "sew the shell or add the face"
+                    ),
+                }
+            )
+    return out
+
+
 def _mesh_nonmanifold_vertices(welded, coord) -> list:
     """Mesh vertices where ≥2 surface sheets meet at a single point (corner-to-corner
     touch) — edge-manifold and watertight but not a 2-manifold surface, which a CAD
@@ -220,6 +251,7 @@ def collect_defects(shape) -> list:
             defects.append({"kind": "locator_error", "detail": repr(exc)[:200]})
     try:
         welded, coord = _weld(shape)
+        defects += _mesh_open_edges(welded, coord)
         defects += _mesh_nonmanifold_edges(welded, coord)
         defects += _mesh_nonmanifold_vertices(welded, coord)
     except Exception as exc:  # noqa: BLE001

@@ -41,6 +41,20 @@ def test_locate_mesh_nonmanifold_edge_with_coordinates(session):
     assert nm[0]["where"][0] == pytest.approx(5.0, abs=0.5)
 
 
+def test_locate_mesh_open_edge_with_coordinates(session):
+    """A box missing one face (5-faced Shell) is a genuinely unclosed tessellated
+    boundary — mesh_open_edge, distinct from mesh_nonmanifold_edge — the class that
+    previously came back with zero located defects (the locator had no open-edge
+    check at all, only non-manifold-edge/-vertex), forcing an agent to hand-roll
+    triangulation to find it. The missing top face's 4 rim edges must be located."""
+    execute_code(session, "show(Shell(Box(10, 10, 10).faces()[:5]), 'opn')")
+    out = locate_gate_defects(session, "opn")
+    defects = _payload(out)["defects"]
+    op = [d for d in defects if d["kind"] == "mesh_open_edge"]
+    assert len(op) == 4, defects
+    assert all(len(d["where"]) == 3 for d in op)
+
+
 def test_locate_falls_back_in_process_when_subprocess_blocked(session, monkeypatch):
     """On a host that blocks child processes (#143 / InProcessSession), subprocess.run
     raises OSError — the tool must still locate defects in-process, not break."""

@@ -146,6 +146,61 @@ extend-and-trim with one planar cut. For imported solids, prefer targeted solid
 repair over broad shape healing; global healing can reorient faces or collapse
 volume.
 
+**Extending a boss, or relocating any planar/annular face along its own normal
+(raising a bore's counterbore opening, moving a shoulder) is a common instance
+of this trap, with a better fix than interpenetrating.** These features have a
+constant cross-section at the join, so unioning a new cylinder, tube or ring
+on top — butt-joined or buried with overlap — often leaves the old face stuck
+as a duplicate internal face the fuse won't dissolve (`validate()` FAILs with
+"N mesh non-manifold edge(s) — faces meet >2-ways", the two pieces stay
+separate solids, or a `validate()` PASS is followed by an `export()` failure
+after the STEP round-trip re-checks orientation on the old face's remnants).
+Extrude the feature's *own* face instead of adding a separately-built
+primitive — a face extruded from the part's own boundary shares the exact
+underlying geometry, so a follow-up fuse dissolves it cleanly where a
+coincidentally-matching new primitive would not, even when it's positioned to
+match exactly:
+
+- **One-sided** (extend/relocate toward a target on one end only — the more
+  common case): `BRepFeat_MakePrism` turns the face into a prism *feature*
+  that extends the existing topology in place, so there is no second solid to
+  fuse at all. Take the direction from the seat's own normal — never hardcode
+  an axis, since a boss off the part's dominant axis (tilted, horizontal, on a
+  cast body) needs its own direction, and a wrong one silently collapses the
+  result to zero volume with `IsDone()` still True:
+
+  ```python
+  from OCP.BRepFeat import BRepFeat_MakePrism
+  from OCP.gp import gp_Dir
+  # seat = the planar face to move (an annulus if it rims a bore or coaxial hole)
+  n = seat.normal_at(seat.center())
+  mk = BRepFeat_MakePrism(part.wrapped, seat.wrapped, seat.wrapped, gp_Dir(n.X, n.Y, n.Z), 1, True)
+  mk.Perform(delta)  # delta = distance to move along the axis
+  if not mk.IsDone():
+      raise RuntimeError("BRepFeat_MakePrism failed — seat face may not belong to part's topology")
+  extended = Solid(mk.Shape())
+  ```
+
+- **Symmetric** (both ends of a boss grow by the same total amount): no raw
+  OCCT needed — `extrude()` each end-cap face along its own normal by half the
+  total growth, then fuse both onto the same running result (fusing the
+  second extension onto the original `part` instead of the already-extended
+  result would silently discard the first end's growth):
+
+  ```python
+  half = delta / 2   # delta = TOTAL growth; each end grows by half
+  top_ext = extrude(top_seat, amount=half)       # top_seat, bottom_seat = the boss's two end-cap faces
+  bottom_ext = extrude(bottom_seat, amount=half)
+  extended = part.fuse(top_ext).fuse(bottom_ext)
+  ```
+
+Either way, extruding the actual face preserves the exact cross-section — a
+coaxial bore or hole extends along with the OD — so verify by re-measuring the
+moved face's new position, not just that `validate()` passed; a `validate()`
+PASS on this construction can still fail the stricter `export()` round-trip
+check, which is the signal to switch from add-and-fuse to this technique if
+you haven't already.
+
 Only if a single unavoidable operation (IsoThread, a multi-body fillet, a very
 high-face-count boolean) still can't fit, drop out of the session for that one op:
 
