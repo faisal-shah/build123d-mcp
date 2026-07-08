@@ -131,6 +131,42 @@ def test_refined_untriangulated_face_with_coordinates(monkeypatch):
     assert d["deflection_mm"] < 0.005
 
 
+def test_refined_untriangulated_locator_ignores_base_missing_face(monkeypatch):
+    """A face that is already missing at the base gate deflection is not a
+    refined-only defect; the locator should leave that class to the gate's base
+    `untriangulated_faces` report instead of emitting a misleading repair hint."""
+    import OCP.BRepMesh as brep_mesh
+    from build123d import Box
+    from OCP.BRep import BRep_Tool
+
+    from build123d_mcp._locate_subprocess import _mesh_refined_untriangulated_faces
+
+    box = Box(10, 10, 10)
+    state = {"deflection": None, "missed_base": False}
+    orig_mesh = brep_mesh.BRepMesh_IncrementalMesh
+    orig_tri = BRep_Tool.Triangulation_s
+
+    def _tracking_mesh(*args):
+        if len(args) >= 2 and isinstance(args[1], (int, float)):
+            state["deflection"] = float(args[1])
+        return orig_mesh(*args)
+
+    def _base_only_missing_tri(face, loc):
+        if (
+            state["deflection"] is not None
+            and state["deflection"] >= 0.005
+            and not state["missed_base"]
+        ):
+            state["missed_base"] = True
+            return None
+        return orig_tri(face, loc)
+
+    monkeypatch.setattr(brep_mesh, "BRepMesh_IncrementalMesh", _tracking_mesh)
+    monkeypatch.setattr(BRep_Tool, "Triangulation_s", staticmethod(_base_only_missing_tri))
+
+    assert _mesh_refined_untriangulated_faces(box) == []
+
+
 def test_locate_falls_back_in_process_when_subprocess_blocked(session, monkeypatch):
     """On a host that blocks child processes (#143 / InProcessSession), subprocess.run
     raises OSError — the tool must still locate defects in-process, not break."""

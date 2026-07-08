@@ -376,6 +376,7 @@ def _mesh_refined_untriangulated_faces(shape) -> list:
     from OCP.BRep import BRep_Tool
     from OCP.BRepGProp import BRepGProp
     from OCP.BRepMesh import BRepMesh_IncrementalMesh
+    from OCP.BRepTools import BRepTools
     from OCP.GProp import GProp_GProps
     from OCP.TopAbs import TopAbs_FACE
     from OCP.TopExp import TopExp
@@ -395,10 +396,36 @@ def _mesh_refined_untriangulated_faces(shape) -> list:
         return []
     base_deflection = min(0.5, max(0.005, diag * 1e-3))
     refined_deflection = base_deflection / _REFINED_UNTRIANGULATED_FACTOR
-    BRepMesh_IncrementalMesh(occ, refined_deflection, False, 0.5, True)
+
+    # The defect class is "present at the base gate deflection, missing after a
+    # modest refinement". Clear any cached triangulation first so an in-process
+    # fallback after another mesh-heavy tool does not mistake a retained refined
+    # mesh for the base pass.
+    BRepTools.Clean_s(occ)
+    BRepMesh_IncrementalMesh(occ, base_deflection, False, 0.5, True)
 
     faces = TopTools_IndexedMapOfShape()
     TopExp.MapShapes_s(occ, TopAbs_FACE, faces)
+    base_triangulated: set[int] = set()
+    base_tris = 0
+    for fi in range(1, faces.Size() + 1):
+        face = TopoDS.Face_s(faces.FindKey(fi))
+        loc = TopLoc_Location()
+        tri = BRep_Tool.Triangulation_s(face, loc)
+        if tri is None:
+            continue
+        base_triangulated.add(fi)
+        base_tris += tri.NbTriangles()
+    if not base_triangulated:
+        return []
+    if base_tris > _REFINED_UNTRIANGULATED_MAX_TRIS:
+        raise RuntimeError(
+            f"shape too large for the refined untriangulated-face locator ({base_tris} "
+            f"base triangles > {_REFINED_UNTRIANGULATED_MAX_TRIS}) — skipped, other locators still ran"
+        )
+
+    BRepMesh_IncrementalMesh(occ, refined_deflection, False, 0.5, True)
+
     out = []
     n_tris = 0
     for fi in range(1, faces.Size() + 1):
@@ -407,6 +434,8 @@ def _mesh_refined_untriangulated_faces(shape) -> list:
         tri = BRep_Tool.Triangulation_s(face, loc)
         if tri is not None:
             n_tris += tri.NbTriangles()
+            continue
+        if fi not in base_triangulated:
             continue
         g = GProp_GProps()
         BRepGProp.SurfaceProperties_s(face, g)
