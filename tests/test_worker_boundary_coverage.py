@@ -116,6 +116,15 @@ def _locate_gate_defects(ws, tmp_path):
     assert "No validity defects" in r  # 'a' is a seeded valid unit box → no defects
 
 
+def _recover_candidate(ws, tmp_path):
+    r = json.loads(ws.recover_candidate("a", "a_recover_candidate"))
+    assert "error" not in r
+    assert r["status"] == "no_action"
+    assert r["source"] == "a"
+    state = json.loads(ws.session_state())
+    assert "a_recover_candidate" not in state["objects"]
+
+
 def _design_audit(ws, tmp_path):
     # Seed a parametric program in the worker, then audit it end-to-end across the
     # boundary. An empty parent proxy has no execute_history, so it would return
@@ -284,6 +293,7 @@ SESSION_STATEFUL_TOOLS = {
     "measure": _measure,
     "validate": _validate,
     "locate_gate_defects": _locate_gate_defects,
+    "recover_candidate": _recover_candidate,
     "design_audit": _design_audit,
     "verify_spec": _verify_spec,
     "suggest_spec": _suggest_spec,

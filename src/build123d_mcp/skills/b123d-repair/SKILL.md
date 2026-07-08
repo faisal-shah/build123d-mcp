@@ -41,6 +41,10 @@ Do not apply repairs blind. First identify the defect class and its location.
 2. **Get coordinates.** `locate_gate_defects()` returns the failing edge/face's
    3D position and B-rep identity — repair that exact spot, never chase the
    defect blind.
+   For a BRep-invalid face inherited from an import, `recover_candidate()` can
+   run the targeted defeature rung out-of-process and register a named candidate
+   without replacing `part`. Treat its report as audit data only: it deliberately
+   does not emit a fidelity verdict.
 3. **Localize the face** when BRepCheck is the failure — build ONE analyzer
    over the whole solid, not one per face (`locate_gate_defects()` itself
    runs out-of-process specifically because per-face BRepCheck work "can run
@@ -199,6 +203,24 @@ Cautions, both observed in the field:
 to close the gap — the right tool when the defect is a discrete face and its
 neighbours are healthy. Also removes a feature's faces cleanly (grooves, bores)
 without plugging.
+
+Prefer the bounded tool for the first attempt when the bad face came from
+`locate_gate_defects()`:
+
+```text
+recover_candidate("part", store_as="part_recover_candidate")
+```
+
+If it returns `status: "candidate"`, inspect the named candidate with
+`validate("part_recover_candidate")`, `render_view(objects="part_recover_candidate")`,
+`measure("part_recover_candidate")`, and `shape_compare("part", "part_recover_candidate")`
+before adoption. The tool registers a candidate and reports selected faces,
+OCCT history where available, and topology/volume deltas; it never replaces
+`part` and never says the heal is faithful. If the candidate preserves design
+intent, adopt it explicitly with `show(part_recover_candidate, "part")`.
+
+Use the raw OCP form below when you need to compose a custom attempt in
+`execute()` or pass a manually selected `bad_face`:
 
 ```python
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Defeaturing

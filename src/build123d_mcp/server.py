@@ -213,6 +213,19 @@ def locate_gate_defects(object_name: str = "") -> str:
     return _resolve_session().locate_gate_defects(object_name)
 
 
+@mcp.tool(annotations=_MUTATING)
+def recover_candidate(
+    object_name: str = "",
+    store_as: str = "recover_candidate",
+    face_indices: list[int] | None = None,
+    max_faces: int = 4,
+) -> str:
+    """Try a bounded advisory repair and register a named candidate, without replacing the source shape. This is a mechanism tool, not a verdict: it runs the targeted BRep-invalid-face defeaturing rung out-of-process, stores any returned candidate under store_as, leaves current_shape and the source object unchanged, and returns JSON with defects, selected faces, OCCT history/face-accounting where available, topology/volume deltas, and explicit next steps. Use after validate()/locate_gate_defects() on inherited invalid geometry. Always inspect the candidate with validate(), render/measure/shape_compare, and adopt it explicitly only if design intent is preserved. face_indices optionally overrides the located BRep-invalid faces for a narrower/manual primitive attempt; max_faces bounds broad accidental repairs."""
+    result = _resolve_session().recover_candidate(object_name, store_as, face_indices, max_faces)
+    _publish_deltas()
+    return result
+
+
 # read-only despite the name: it perturbs parameters in a subprocess and never mutates
 # the live session (don't "fix" this to _MUTATING).
 @mcp.tool(annotations=_READ_ONLY)
