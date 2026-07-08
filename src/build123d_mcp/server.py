@@ -213,19 +213,6 @@ def locate_gate_defects(object_name: str = "") -> str:
     return _resolve_session().locate_gate_defects(object_name)
 
 
-@mcp.tool(annotations=_MUTATING)
-def recover_candidate(
-    object_name: str = "",
-    store_as: str = "recover_candidate",
-    face_indices: list[int] | None = None,
-    max_faces: int = 4,
-) -> str:
-    """Try a bounded advisory repair ladder and register a named candidate, without replacing the source shape. This is a mechanism tool, not a verdict: it runs cleanup, a planar-wire patch for one malformed face, guarded micro-relief for small refined-tessellation slivers exposed by that patch, and targeted BRep-invalid-face defeaturing rungs out-of-process, stores the first candidate that passes the exact export-style structural gate under store_as, leaves current_shape and the source object unchanged, and returns JSON with rung reports, defects, selected faces, OCCT history/face-accounting where available, topology/volume deltas, and explicit next steps. Use after validate()/locate_gate_defects() on inherited invalid geometry. Always inspect the candidate with validate(), render/measure/shape_compare, and adopt it explicitly only if design intent is preserved. face_indices optionally provides a fallback manual primitive attempt; located BRep-invalid faces on the child topology are preferred because face order can change after STEP round-trip or cleanup. max_faces bounds broad accidental repairs."""
-    result = _resolve_session().recover_candidate(object_name, store_as, face_indices, max_faces)
-    _publish_deltas()
-    return result
-
-
 # read-only despite the name: it perturbs parameters in a subprocess and never mutates
 # the live session (don't "fix" this to _MUTATING).
 @mcp.tool(annotations=_READ_ONLY)
@@ -960,7 +947,7 @@ def build123d_modeling_skill() -> str:
 @mcp.resource(
     "build123d://skill/repair",
     mime_type="text/plain",
-    description="The b123d-repair workflow skill: step-by-step guide for healing a solid that fails the validity gate — diagnose the defect class from the gate output + locate_gate_defects(), then work a field-proven repair ladder (ShapeFix, boolean re-computation, defeaturing, sliver-face surgery), verifying every attempt with the export gate.",
+    description="The b123d-repair workflow skill: diagnose a validity-gate failure with validate()/export()/locate_gate_defects(), then write explicit build123d/OCP repair code in execute() using field-proven patterns, snapshots, and export-gate verification.",
 )
 def build123d_repair_skill() -> str:
     """b123d-repair workflow skill."""

@@ -867,7 +867,6 @@ def test_mcp_lists_all_tools():
         "measure",
         "validate",
         "locate_gate_defects",
-        "recover_candidate",
         "design_audit",
         # verify_spec / suggest_spec are experimental and off by default (#362);
         # test_mcp_experimental_flag_enables_verify_tools covers the --experimental path.

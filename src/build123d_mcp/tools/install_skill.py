@@ -40,9 +40,9 @@ SKILLS = {
     "repair": {
         "dir": "b123d-repair",
         "cursor_description": (
-            "CAD geometry repair workflow: heal a solid that fails the validity "
-            "gate (BRepCheck / open edges / non-manifold / mesh defects) with the "
-            "build123d-mcp MCP server"
+            "CAD geometry repair workflow: diagnose validity-gate failures with "
+            "build123d-mcp, then write explicit build123d/OCP repair code with "
+            "export-gate verification"
         ),
         # No path affinity — the rule is routed by description (agent-requested).
         "cursor_globs": "",

@@ -742,16 +742,6 @@ class WorkerSession:
     def locate_gate_defects(self, object_name: str = "") -> str:
         raise NotImplementedError
 
-    @_op(_tool(f"{_T}.recover:recover_candidate"), _export_budget)
-    def recover_candidate(
-        self,
-        object_name: str = "",
-        store_as: str = "recover_candidate",
-        face_indices: list[int] | None = None,
-        max_faces: int = 4,
-    ) -> str:
-        raise NotImplementedError
-
     @_op(_tool(f"{_T}.design_audit:design_audit"), _export_budget)
     def design_audit(self, epsilon: float = 0.1, max_params: int = 8) -> str:
         raise NotImplementedError
