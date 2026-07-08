@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import Counter
 
 from build123d_mcp.tools._budget import op_budget
 from build123d_mcp.tools.validate import _resolve_shape
@@ -29,17 +30,179 @@ from build123d_mcp.tools.validate import _resolve_shape
 _LOCATE_MARGIN_S = 15
 _LOCATE_MIN_S = 10
 
+_DEFECT_DIAGNOSTICS = {
+    "brep_invalid_face": {
+        "diagnostic_class": "brep_quality",
+        "repair_family": "rebuild_or_replace_bad_face",
+        "next_step": (
+            "Use face_index/where to inspect the local patch, then rebuild or replace that "
+            "face explicitly in execute(); avoid broad opaque healing."
+        ),
+    },
+    "open_edge": {
+        "diagnostic_class": "brep_topology",
+        "repair_family": "sew_shell_or_add_missing_face",
+        "next_step": (
+            "Use the edge midpoint to find the gap, then add the missing face or sew the "
+            "local shell in execute()."
+        ),
+    },
+    "nonmanifold_edge": {
+        "diagnostic_class": "brep_topology",
+        "repair_family": "separate_self_touch_or_redo_boolean",
+        "next_step": (
+            "Inspect the edge shared by 3+ faces; redo the boolean or add explicit relief "
+            "so the result is a true manifold."
+        ),
+    },
+    "mesh_open_edge": {
+        "diagnostic_class": "mesh_topology",
+        "repair_family": "repair_nonconformal_face_junction",
+        "next_step": (
+            "Treat the coordinate as a non-conformal face junction; re-patch or re-sew "
+            "the local faces and verify with export(), not validate() alone."
+        ),
+    },
+    "mesh_nonmanifold_edge": {
+        "diagnostic_class": "mesh_topology",
+        "repair_family": "separate_self_touch_or_redo_boolean",
+        "next_step": (
+            "Inspect for coincident or tangent sheets meeting >2 ways; redo the boolean "
+            "or add explicit clearance/relief in build123d code."
+        ),
+    },
+    "mesh_nonmanifold_vertex": {
+        "diagnostic_class": "mesh_topology",
+        "repair_family": "avoid_corner_touch",
+        "next_step": (
+            "Separate corner-touching bodies or add enough material/overlap that they "
+            "fuse into one 2-manifold solid."
+        ),
+    },
+    "mesh_refined_untriangulated_face": {
+        "diagnostic_class": "mesh_quality",
+        "repair_family": "repatch_fragile_face",
+        "next_step": (
+            "Use face_index/where to find the fragile face, simplify or re-patch it, "
+            "then run the export gate."
+        ),
+    },
+    "mesh_vertex_deflection_defect": {
+        "diagnostic_class": "mesh_quality",
+        "repair_family": "repatch_boundary_to_vertices",
+        "next_step": (
+            "Rebuild the local patch so triangulated edge endpoints match the BREP "
+            "vertices; tolerance-only fixes can still fail downstream."
+        ),
+    },
+    "locator_error": {
+        "diagnostic_class": "diagnostic_incomplete",
+        "repair_family": "rerun_or_cross_check",
+        "next_step": (
+            "The locator skipped one probe; cross-check validate()/export() output and "
+            "rerun locate_gate_defects() after simplifying or isolating the part."
+        ),
+    },
+}
+
+_DEFECT_PRIORITY = (
+    "brep_invalid_face",
+    "open_edge",
+    "nonmanifold_edge",
+    "mesh_open_edge",
+    "mesh_nonmanifold_edge",
+    "mesh_nonmanifold_vertex",
+    "mesh_refined_untriangulated_face",
+    "mesh_vertex_deflection_defect",
+    "locator_error",
+)
+
+
+def _enrich_defect(defect: dict) -> dict:
+    out = dict(defect)
+    meta = _DEFECT_DIAGNOSTICS.get(str(out.get("kind", "?")), {})
+    for key in ("diagnostic_class", "repair_family", "next_step"):
+        if key in meta:
+            out.setdefault(key, meta[key])
+    if meta and "verify_after_repair" not in out:
+        out["verify_after_repair"] = (
+            "Run export(..., 'step') so the written-and-reimported STEP passes the gate; "
+            "validate() alone can miss round-trip failures."
+        )
+    return out
+
+
+def _diagnosis(defects: list[dict]) -> dict:
+    if not defects:
+        return {
+            "status": "no_located_defects",
+            "primary_kind": None,
+            "counts_by_kind": {},
+            "diagnostic_classes": [],
+            "repair_families": [],
+            "recommended_next_steps": [
+                "If validate()/export() still reports FAIL, inspect that exact gate output; "
+                "this locator only reports structural gate defects it can localise."
+            ],
+        }
+
+    counts = Counter(str(d.get("kind", "?")) for d in defects)
+    primary = next(
+        (kind for kind in _DEFECT_PRIORITY if counts.get(kind)), counts.most_common(1)[0][0]
+    )
+    classes = sorted(
+        {
+            str(d.get("diagnostic_class"))
+            for d in defects
+            if d.get("diagnostic_class") and d.get("diagnostic_class") != "diagnostic_incomplete"
+        }
+    )
+    families = sorted(
+        {
+            str(d.get("repair_family"))
+            for d in defects
+            if d.get("repair_family") and d.get("repair_family") != "rerun_or_cross_check"
+        }
+    )
+    primary_meta = _DEFECT_DIAGNOSTICS.get(primary, {})
+    steps = [
+        "Open build123d://skill/repair and use the matching repair-family section.",
+        primary_meta.get(
+            "next_step",
+            "Use the located coordinates/indices to write an explicit local repair in execute().",
+        ),
+        "After each attempt, restore failed snapshots and verify the written STEP with export().",
+    ]
+    if counts.get("locator_error"):
+        steps.insert(
+            1,
+            "One locator probe was incomplete; use the reported defects plus validate()/export() "
+            "rather than treating this as exhaustive.",
+        )
+    return {
+        "status": "defects_located",
+        "primary_kind": primary,
+        "counts_by_kind": dict(sorted(counts.items())),
+        "diagnostic_classes": classes,
+        "repair_families": families,
+        "recommended_next_steps": steps,
+    }
+
 
 def _format(defects: list) -> str:
+    enriched = [_enrich_defect(d) for d in defects]
+    payload = {
+        "count": len(enriched),
+        "defects": enriched,
+        "diagnosis": _diagnosis(enriched),
+    }
     if not defects:
         return (
             "No validity defects located — the part passes the structural checks.\n"
-            + json.dumps({"count": 0, "defects": []})
+            + json.dumps(payload)
         )
-    kinds = ", ".join(sorted({d.get("kind", "?") for d in defects}))
-    return f"{len(defects)} defect(s) located ({kinds}):\n" + json.dumps(
-        {"count": len(defects), "defects": defects}, indent=2
-    )
+    kinds = ", ".join(sorted({d.get("kind", "?") for d in enriched}))
+    return f"{len(defects)} defect(s) located ({kinds}):\n" + json.dumps(payload, indent=2)
 
 
 def locate_gate_defects(session, object_name: str = "") -> str:
@@ -58,8 +221,10 @@ def locate_gate_defects(session, object_name: str = "") -> str:
     patched/healed face whose boundary is topologically closed but
     geometrically off-vertex; BRepCheck and a coordinate weld both miss this,
     but a CAD scorer's own mesh sanity check does not). Empty list means the
-    part passes the structural checks. object_name: named object from show()
-    (default: current shape).
+    part passes the structural checks. The JSON also includes ``diagnosis``:
+    counts by defect kind, the primary defect class, repair-family labels, and
+    next steps that keep the repair as explicit build123d/OCP code in
+    ``execute()``. object_name: named object from show() (default: current shape).
     """
     t0 = time.monotonic()
     shape, err = _resolve_shape(session, object_name)

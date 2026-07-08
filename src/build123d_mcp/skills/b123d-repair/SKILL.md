@@ -10,6 +10,22 @@ applies, when it fails, and what to try next. Work the ladder in order — the
 cheap fixes first — and verify every attempt with the **export gate**, not
 `validate()` alone (Step 2 explains why).
 
+This skill is deliberately an agent-authored repair workflow, not an automatic
+healer. The MCP server should help you write better build123d/OCP code by
+answering:
+
+- `validate()` / `export()` — is the current or written shape structurally
+  acceptable?
+- `locate_gate_defects()` — where is the failing face, edge, or mesh defect?
+- this repair skill — which generic repair pattern fits that defect class?
+
+The geometry-changing repair itself should be explicit code in `execute()`,
+with named variables, printed measurements, `save_snapshot()` / rollback
+points, and a visible volume/bbox/gate audit. Do not delegate the repair to an
+opaque MCP tool that silently manipulates the B-rep and returns a shape; that
+prevents the agent from reasoning about design intent and makes benchmark
+success hard to distinguish from accidental geometry surgery.
+
 ---
 
 ## Step 0 — Diagnose before cutting
@@ -40,7 +56,10 @@ Do not apply repairs blind. First identify the defect class and its location.
      drop-and-sew one.
 2. **Get coordinates.** `locate_gate_defects()` returns the failing edge/face's
    3D position and B-rep identity — repair that exact spot, never chase the
-   defect blind.
+   defect blind. Read its top-level `diagnosis` block too: `primary_kind`,
+   `diagnostic_classes`, and `repair_families` tell you which rung to try first,
+   while each defect's `next_step` says what explicit `execute()` repair to
+   write and reminds you to verify the written STEP with `export()`.
 3. **Localize the face** when BRepCheck is the failure — build ONE analyzer
    over the whole solid, not one per face (`locate_gate_defects()` itself
    runs out-of-process specifically because per-face BRepCheck work "can run

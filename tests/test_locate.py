@@ -25,7 +25,10 @@ def test_locate_valid_solid_has_no_defects(session):
     execute_code(session, "show(Box(10, 10, 10), 'part')")
     out = locate_gate_defects(session, "part")
     assert "No validity defects" in out
-    assert _payload(out)["count"] == 0
+    payload = _payload(out)
+    assert payload["count"] == 0
+    assert payload["diagnosis"]["status"] == "no_located_defects"
+    assert payload["diagnosis"]["primary_kind"] is None
 
 
 def test_locate_mesh_nonmanifold_edge_with_coordinates(session):
@@ -39,6 +42,13 @@ def test_locate_mesh_nonmanifold_edge_with_coordinates(session):
     assert len(nm[0]["where"]) == 3
     assert nm[0]["shared_by_triangles"] > 2
     assert nm[0]["where"][0] == pytest.approx(5.0, abs=0.5)
+    assert nm[0]["diagnostic_class"] == "mesh_topology"
+    assert nm[0]["repair_family"] == "separate_self_touch_or_redo_boolean"
+    assert "export" in nm[0]["verify_after_repair"]
+    diagnosis = _payload(out)["diagnosis"]
+    assert diagnosis["primary_kind"] == "mesh_nonmanifold_edge"
+    assert diagnosis["counts_by_kind"]["mesh_nonmanifold_edge"] >= 1
+    assert "mesh_topology" in diagnosis["diagnostic_classes"]
 
 
 def test_locate_mesh_open_edge_with_coordinates(session):

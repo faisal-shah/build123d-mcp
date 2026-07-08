@@ -39,6 +39,12 @@ def test_load_raw_modeling_returns_skill_content():
     assert len(content) > 1000
 
 
+def test_load_raw_edit_returns_skill_content():
+    content = _load_raw("edit")
+    assert "Edit Existing build123d Geometry" in content
+    assert len(content) > 1000
+
+
 def test_load_raw_repair_returns_skill_content():
     content = _load_raw("repair")
     assert "Repair Invalid Geometry" in content
@@ -252,6 +258,14 @@ def test_install_claude_modeling(tmp_path):
     assert "Installed" in result
 
 
+def test_install_claude_edit(tmp_path):
+    result = install_skill(target="claude", cwd=tmp_path, skill="edit")
+    dest = tmp_path / ".claude" / "skills" / "b123d-edit" / "SKILL.md"
+    assert dest.exists()
+    assert "Edit Existing build123d Geometry" in _read(dest)
+    assert "Installed" in result
+
+
 def test_agents_md_both_skills_coexist(tmp_path):
     install_skill(target="agents-md", cwd=tmp_path, skill="drawing")
     install_skill(target="agents-md", cwd=tmp_path, skill="modeling")
@@ -281,6 +295,15 @@ def test_install_cursor_modeling_description_routed(tmp_path):
     assert "globs" not in content.split("---")[1]
 
 
+def test_install_cursor_edit_description_routed(tmp_path):
+    install_skill(target="cursor", cwd=tmp_path, skill="edit")
+    content = _read(tmp_path / ".cursor" / "rules" / "b123d-edit.mdc")
+    assert "description:" in content
+    assert "alwaysApply: false" in content
+    # edit has no path affinity — no globs line at all
+    assert "globs" not in content.split("---")[1]
+
+
 def test_install_claude_repair(tmp_path):
     result = install_skill(target="claude", cwd=tmp_path, skill="repair")
     dest = tmp_path / ".claude" / "skills" / "b123d-repair" / "SKILL.md"
@@ -289,14 +312,17 @@ def test_install_claude_repair(tmp_path):
     assert "Installed" in result
 
 
-def test_agents_md_all_three_skills_coexist(tmp_path):
+def test_agents_md_all_four_skills_coexist(tmp_path):
     install_skill(target="agents-md", cwd=tmp_path, skill="drawing")
     install_skill(target="agents-md", cwd=tmp_path, skill="modeling")
+    install_skill(target="agents-md", cwd=tmp_path, skill="edit")
     install_skill(target="agents-md", cwd=tmp_path, skill="repair")
     content = _read(tmp_path / "AGENTS.md")
     assert content.count("<!-- b123d-drawing:start -->") == 1
     assert content.count("<!-- b123d-modeling:start -->") == 1
+    assert content.count("<!-- b123d-edit:start -->") == 1
     assert content.count("<!-- b123d-repair:start -->") == 1
+    assert "Edit Existing build123d Geometry" in content
     assert "Repair Invalid Geometry" in content
 
 
@@ -313,6 +339,7 @@ def test_dest_exists_tracks_skills_independently(tmp_path):
     install_skill(target="claude", cwd=tmp_path, skill="drawing")
     assert _dest_exists("claude", cwd=tmp_path, skill="drawing")
     assert not _dest_exists("claude", cwd=tmp_path, skill="modeling")
+    assert not _dest_exists("claude", cwd=tmp_path, skill="edit")
     assert not _dest_exists("claude", cwd=tmp_path, skill="repair")
 
 
@@ -334,7 +361,14 @@ def test_server_instructions_registered():
 
     assert mcp.instructions == _INSTRUCTIONS
     assert 0 < len(_INSTRUCTIONS.encode("utf-8")) <= 2048
-    for needle in ("execute()", "measure()", "skill/modeling", "skill/drawing", "skill/repair"):
+    for needle in (
+        "execute()",
+        "measure()",
+        "skill/modeling",
+        "skill/edit",
+        "skill/drawing",
+        "skill/repair",
+    ):
         assert needle in _INSTRUCTIONS
 
 
@@ -345,6 +379,7 @@ def test_modeling_skill_resource_registered():
 
     uris = {str(r.uri) for r in asyncio.run(mcp.list_resources())}
     assert "build123d://skill/modeling" in uris
+    assert "build123d://skill/edit" in uris
     assert "build123d://skill/drawing" in uris
     assert "build123d://skill/repair" in uris
 
