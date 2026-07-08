@@ -791,6 +791,20 @@ def test_repair_hints_matches_cq_idiom():
     assert any("CadQuery" in h or "build123d" in h for h in result["hints"])
 
 
+def test_repair_hints_matches_gate_failure():
+    """Validity-gate reason text gets geometry-diagnostic guidance, not the fallback."""
+    from build123d_mcp.tools.repair_hints import repair_hints
+
+    result = json.loads(
+        repair_hints(
+            "VALIDITY GATE FAIL — 1 mesh non-manifold edge(s) — faces meet >2-ways "
+            "(self-touch / coincident faces)"
+        )
+    )
+    assert any("locate_gate_defects" in h for h in result["hints"])
+    assert any("2-manifold" in h for h in result["hints"])
+
+
 def test_repair_hints_fallback_for_unknown_error():
     """Unrecognised error text returns the generic fallback hint."""
     from build123d_mcp.tools.repair_hints import repair_hints

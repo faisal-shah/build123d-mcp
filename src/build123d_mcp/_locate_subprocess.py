@@ -58,7 +58,10 @@ def _brep_invalid_faces(solid) -> list:
                     "where": [round(c.X(), 3), round(c.Y(), 3), round(c.Z(), 3)],
                     "surface": surf,
                     "status": status,
-                    "hint": "malformed face — defeature it (recover) or rebuild the patch",
+                    "hint": (
+                        "malformed face — remove/replace this local face explicitly in "
+                        "execute() or rebuild the patch"
+                    ),
                 }
             )
         e.Next()

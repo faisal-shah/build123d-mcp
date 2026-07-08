@@ -22,9 +22,10 @@ Quick start: execute("from build123d import *"), build in small steps,
 register parts with show(part, "name"), measure() after every boolean,
 export() when done. Read the build123d://quickref resource before writing
 build code. Step-by-step workflows: build123d://skill/modeling (build 3D
-parts, incl. from technical drawings), build123d://skill/drawing
-(multi-view engineering drawings), and build123d://skill/repair (heal a
-solid that fails the validity gate); install any into the project with
+parts, incl. from technical drawings), build123d://skill/edit (modify an
+existing model), build123d://skill/drawing (multi-view engineering drawings),
+and build123d://skill/repair (repair a solid that fails the validity gate);
+install any into the project with
 install_skill().
 """
 
@@ -209,7 +210,7 @@ def validate(object_name: str = "") -> str:
 
 @mcp.tool(annotations=_READ_ONLY)
 def locate_gate_defects(object_name: str = "") -> str:
-    """Report WHERE a solid fails the validity gate, with 3D coordinates — so you can fix the exact edge/face instead of guessing. validate()/export() tell you WHAT is wrong (e.g. "1 non-manifold edge", "BRepCheck failed") but not where; call this when validate() FAILs to get a per-defect list: brep_invalid_face (face index + center + BRepCheck status, e.g. an unorientable BSpline), open_edge / nonmanifold_edge (B-rep edge midpoint + faces_incident), the mesh self-touches a CAD scorer rejects — mesh_nonmanifold_edge (edge midpoint) and mesh_nonmanifold_vertex (corner-to-corner touch point), mesh_refined_untriangulated_face (a face that only fails to tessellate at a finer tolerance) — and mesh_vertex_deflection_defect (a tessellated edge endpoint that misses its own BREP vertex by more than the mesh deflection — a patched/healed face whose boundary is topologically closed but geometrically off-vertex; BRepCheck and even the open-edge count can both read clean, but a CAD scorer's own mesh sanity check still rejects it). Each defect includes a generic repair hint. An empty list means the part passes the structural checks. Bounded out-of-process (it mesh-checks), so a huge part returns a clean budget error rather than hanging. object_name: named object from show() (default: current shape)."""
+    """Report WHERE a solid fails the validity gate, with 3D coordinates — so you can fix the exact edge/face instead of guessing. validate()/export() tell you WHAT is wrong (e.g. "1 non-manifold edge", "BRepCheck failed") but not where; call this when validate() FAILs to get a per-defect list: brep_invalid_face (face index + center + BRepCheck status, e.g. an unorientable BSpline), open_edge / nonmanifold_edge (B-rep edge midpoint + faces_incident), the mesh self-touches a CAD scorer rejects — mesh_nonmanifold_edge (edge midpoint) and mesh_nonmanifold_vertex (corner-to-corner touch point), mesh_refined_untriangulated_face (a face that only fails to tessellate at a finer tolerance) — and mesh_vertex_deflection_defect (a tessellated edge endpoint that misses its own BREP vertex by more than the mesh deflection — a patched/healed face whose boundary is topologically closed but geometrically off-vertex; BRepCheck and even the open-edge count can both read clean, but a CAD scorer's own mesh sanity check still rejects it). Each defect includes a generic repair hint plus diagnostic_class / repair_family / next_step metadata; the top-level diagnosis block counts defect kinds and recommends the next verification path. An empty list means the part passes the structural checks. Bounded out-of-process (it mesh-checks), so a huge part returns a clean budget error rather than hanging. object_name: named object from show() (default: current shape)."""
     return _resolve_session().locate_gate_defects(object_name)
 
 
@@ -622,7 +623,7 @@ def import_cad_file(path: str, name: str = "") -> str:
 
 @mcp.tool(annotations=_READ_ONLY)
 def repair_hints(error_text: str) -> str:
-    """Given an error message from execute(), return targeted fix suggestions for common build123d mistakes: wrong Location syntax, missing .part, CadQuery idioms, blocked imports, degenerate boolean results, fillet edge selection, and more. Pass the full error string from execute() or last_error()."""
+    """Given an error message or validity-gate reason, return targeted fix suggestions for common build123d mistakes and gate failures: wrong Location syntax, missing .part, CadQuery idioms, blocked imports, degenerate boolean results, fillet edge selection, B-rep defects, mesh non-manifold/open-edge failures, and more. Pass the full error string from execute(), last_error(), validate(), or export()."""
     from build123d_mcp.tools.repair_hints import repair_hints as _repair_hints
 
     return _repair_hints(error_text)
@@ -945,6 +946,18 @@ def build123d_modeling_skill() -> str:
 
 
 @mcp.resource(
+    "build123d://skill/edit",
+    mime_type="text/plain",
+    description="The b123d-edit workflow skill: modify existing build123d source code explicitly, then verify geometry deltas, fit, validity, and export-gate results with build123d-mcp.",
+)
+def build123d_edit_skill() -> str:
+    """b123d-edit workflow skill."""
+    from build123d_mcp.tools.install_skill import _load_raw
+
+    return _load_raw("edit")
+
+
+@mcp.resource(
     "build123d://skill/repair",
     mime_type="text/plain",
     description="The b123d-repair workflow skill: diagnose a validity-gate failure with validate()/export()/locate_gate_defects(), then write explicit build123d/OCP repair code in execute() using field-proven patterns, snapshots, and export-gate verification.",
@@ -966,7 +979,8 @@ def install_skill(target: str = "claude", force: bool = False, skill: str = "dra
     skill: which workflow to install (default "drawing")
       - drawing   → multi-view engineering drawings from build123d geometry
       - modeling  → build 3D parts/assemblies (incl. from technical drawings)
-      - repair    → heal a solid that fails the validity gate
+      - edit      → modify existing build123d code and verify geometry deltas
+      - repair    → repair a solid that fails the validity gate
     target: one of "claude" (default), "agents-md", "cursor", "windsurf"
       - claude     → .claude/skills/<skill-dir>/SKILL.md  (Claude Code)
       - agents-md  → AGENTS.md  (Codex CLI, Antigravity, GitHub Copilot, Cline)
