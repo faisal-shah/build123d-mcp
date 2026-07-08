@@ -42,9 +42,11 @@ Do not apply repairs blind. First identify the defect class and its location.
    3D position and B-rep identity — repair that exact spot, never chase the
    defect blind.
    For a BRep-invalid face inherited from an import, `recover_candidate()` can
-   run the targeted defeature rung out-of-process and register a named candidate
-   without replacing `part`. Treat its report as audit data only: it deliberately
-   does not emit a fidelity verdict.
+   run a bounded cleanup/patch/defeature ladder out-of-process and register a
+   named candidate without replacing `part`. Treat its report as audit data
+   only: it deliberately does not emit a fidelity verdict, and
+   `status: "candidate"` only means the candidate passed the strict structural
+   gate.
 3. **Localize the face** when BRepCheck is the failure — build ONE analyzer
    over the whole solid, not one per face (`locate_gate_defects()` itself
    runs out-of-process specifically because per-face BRepCheck work "can run
@@ -211,13 +213,20 @@ Prefer the bounded tool for the first attempt when the bad face came from
 recover_candidate("part", store_as="part_recover_candidate")
 ```
 
+The tool first tries conservative cleanup, then a bounded planar-wire patch for
+a single malformed face, then targeted defeaturing on cleaned and raw topology.
+It prefers BRep-invalid faces located inside the recovery subprocess because
+STEP round-trips and cleanup can change face indices; explicit `face_indices`
+are a fallback when no invalid face is locatable. Native defeaturing is skipped
+for high-edge-count malformed faces because OCCT can run unbounded on that
+topology; use the rung report to decide whether a manual local patch is needed.
 If it returns `status: "candidate"`, inspect the named candidate with
 `validate("part_recover_candidate")`, `render_view(objects="part_recover_candidate")`,
 `measure("part_recover_candidate")`, and `shape_compare("part", "part_recover_candidate")`
 before adoption. The tool registers a candidate and reports selected faces,
-OCCT history where available, and topology/volume deltas; it never replaces
-`part` and never says the heal is faithful. If the candidate preserves design
-intent, adopt it explicitly with `show(part_recover_candidate, "part")`.
+OCCT history where available, exact-gate outcome, and topology/volume deltas; it
+never replaces `part` and never says the heal is faithful. If the candidate
+preserves design intent, adopt it explicitly with `show(part_recover_candidate, "part")`.
 
 Use the raw OCP form below when you need to compose a custom attempt in
 `execute()` or pass a manually selected `bad_face`:

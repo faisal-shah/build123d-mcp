@@ -1,9 +1,9 @@
 """Advisory repair-candidate tool.
 
 ``recover_candidate()`` implements the safe shape of the old recover idea: run a
-bounded repair rung out-of-process, register a named candidate if one is produced,
-and return a change report. It never replaces the source object and never emits a
-fidelity verdict.
+bounded repair ladder out-of-process, register the first exact-gate-clean named
+candidate if one is produced, and return a change report. It never replaces the
+source object and never emits a fidelity verdict.
 """
 
 import json
@@ -20,6 +20,7 @@ from build123d_mcp.tools.validate import _resolve_shape
 
 _RECOVER_MARGIN_S = 15
 _RECOVER_MIN_S = 10
+_RECOVER_GATE_TIMEOUT_MAX_S = 35
 
 
 def _source_names(session: Any, shape: Any) -> list[str]:
@@ -49,7 +50,7 @@ def _run_bounded_recover(
             return (
                 {
                     "status": "failed",
-                    "rung": "defeature_invalid_faces",
+                    "rung": "recover_ladder",
                     "error": f"could not serialize source shape for bounded recovery: {exc}",
                     "fidelity_verdict": "not_provided",
                     "current_shape_unchanged": True,
@@ -62,7 +63,7 @@ def _run_bounded_recover(
             return (
                 {
                     "status": "failed",
-                    "rung": "defeature_invalid_faces",
+                    "rung": "recover_ladder",
                     "error": "not enough of the op budget left to attempt recovery safely",
                     "fidelity_verdict": "not_provided",
                     "current_shape_unchanged": True,
@@ -77,6 +78,10 @@ def _run_bounded_recover(
                     "candidate_step": candidate_step,
                     "face_indices": face_indices,
                     "max_faces": max_faces,
+                    "gate_timeout_s": max(
+                        _RECOVER_MIN_S,
+                        min(_RECOVER_GATE_TIMEOUT_MAX_S, remaining / 3),
+                    ),
                 },
                 f,
             )
@@ -98,7 +103,7 @@ def _run_bounded_recover(
             return (
                 {
                     "status": "timeout",
-                    "rung": "defeature_invalid_faces",
+                    "rung": "recover_ladder",
                     "error": (
                         "bounded recovery exceeded the time budget and was stopped; "
                         "the live session was not mutated"
@@ -112,7 +117,7 @@ def _run_bounded_recover(
             return (
                 {
                     "status": "failed",
-                    "rung": "defeature_invalid_faces",
+                    "rung": "recover_ladder",
                     "error": f"could not start bounded recovery subprocess: {exc}",
                     "fidelity_verdict": "not_provided",
                     "current_shape_unchanged": True,
@@ -124,7 +129,7 @@ def _run_bounded_recover(
             return (
                 {
                     "status": "failed",
-                    "rung": "defeature_invalid_faces",
+                    "rung": "recover_ladder",
                     "error": "recover subprocess failed: " + (proc.stderr or "")[-300:],
                     "fidelity_verdict": "not_provided",
                     "current_shape_unchanged": True,
@@ -138,7 +143,7 @@ def _run_bounded_recover(
             return (
                 {
                     "status": "failed",
-                    "rung": "defeature_invalid_faces",
+                    "rung": "recover_ladder",
                     "error": f"recover subprocess produced an unreadable report: {exc}",
                     "fidelity_verdict": "not_provided",
                     "current_shape_unchanged": True,
@@ -180,9 +185,11 @@ def recover_candidate(
 ) -> str:
     """Try a bounded advisory repair and register a named candidate.
 
-    The first rung is targeted defeaturing of BRep-invalid faces (or explicit
-    ``face_indices``). A produced candidate is stored under ``store_as`` while
-    ``current_shape`` and the source object are left unchanged.
+    The ladder currently tries conservative cleanup, a bounded planar-wire patch
+    for one malformed face, then targeted defeaturing of BRep-invalid faces on
+    cleaned and raw topology. A produced candidate is stored under ``store_as``
+    only after the exact structural gate passes, while ``current_shape`` and the
+    source object are left unchanged.
     """
 
     shape, err = _resolve_shape(session, object_name)
