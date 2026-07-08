@@ -324,12 +324,7 @@ def _cheap_structural_gate(shape: Any) -> dict:
         brep_error = None
 
     watertight_manifold = bad_edges_ok and open_edges == 0 and nonmanifold_edges == 0
-    passes_gate = (
-        n_solids == 1
-        and abs(volume) > _EPS
-        and watertight_manifold
-        and brep_valid
-    )
+    passes_gate = n_solids == 1 and abs(volume) > _EPS and watertight_manifold and brep_valid
     problems = []
     if n_solids != 1:
         problems.append(f"{n_solids} solid bodies")
@@ -378,8 +373,10 @@ def _evaluate_candidate(candidate: Any, manifest: dict) -> dict:
         "gate_report": fast_report,
         "passes_exact_gate": False,
     }
-    if not fast_report.get("brep_valid") or fast_report.get("open_edges") or fast_report.get(
-        "nonmanifold_edges"
+    if (
+        not fast_report.get("brep_valid")
+        or fast_report.get("open_edges")
+        or fast_report.get("nonmanifold_edges")
     ):
         evaluation["reject_reason"] = "candidate failed BRep/edge gate before exact mesh check"
         return evaluation
@@ -527,7 +524,10 @@ def _planar_wire_patch_candidate(shape: Any, selected: list[int]) -> tuple[Any, 
     reshaper.Replace(bad_face.wrapped, face_builder.Face())
     candidate, sew_report = _sew_same_parameter_fix(reshaper.Apply(shape.wrapped), 1e-3)
     return candidate, {
-        "selected_face": {"face_index": idx, "center": _face_summary(_raw_faces(shape.wrapped)[idx], idx)["center"]},
+        "selected_face": {
+            "face_index": idx,
+            "center": _face_summary(_raw_faces(shape.wrapped)[idx], idx)["center"],
+        },
         "replacement": "planar_face_on_existing_boundary_wire",
         **sew_report,
     }
@@ -552,7 +552,9 @@ def _attempt_planar_wire_patch_rung(
         "selected_face_indices": selected,
     }
     if not selected:
-        entry["reason"] = "no BRep-invalid faces were located and no face_indices override was supplied"
+        entry["reason"] = (
+            "no BRep-invalid faces were located and no face_indices override was supplied"
+        )
         return entry
     if len(selected) != 1:
         entry["reason"] = "planar wire patch is limited to one malformed face"
@@ -628,8 +630,7 @@ def _summarize_refined_defects(shape: Any, defects: list[dict]) -> tuple[list[di
         merged = {**defect, "face": summary}
         if float(summary.get("area") or 0.0) > _MICRO_RELIEF_FACE_AREA_MAX_MM2:
             merged["skip_reason"] = (
-                f"face area exceeds micro-relief limit "
-                f"({_MICRO_RELIEF_FACE_AREA_MAX_MM2} mm^2)"
+                f"face area exceeds micro-relief limit ({_MICRO_RELIEF_FACE_AREA_MAX_MM2} mm^2)"
             )
             skipped.append(merged)
             continue
@@ -757,7 +758,9 @@ def _attempt_defeature_rung(
         "selected_face_indices": selected,
     }
     if not selected:
-        entry["reason"] = "no BRep-invalid faces were located and no face_indices override was supplied"
+        entry["reason"] = (
+            "no BRep-invalid faces were located and no face_indices override was supplied"
+        )
         return entry
     complex_faces = _complex_selected_faces(faces, selected)
     if complex_faces:
