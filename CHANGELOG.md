@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.3.73.dev0
+## v0.3.73
 
 ### Fixed
 
