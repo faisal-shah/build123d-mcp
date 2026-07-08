@@ -214,12 +214,15 @@ recover_candidate("part", store_as="part_recover_candidate")
 ```
 
 The tool first tries conservative cleanup, then a bounded planar-wire patch for
-a single malformed face, then targeted defeaturing on cleaned and raw topology.
-It prefers BRep-invalid faces located inside the recovery subprocess because
-STEP round-trips and cleanup can change face indices; explicit `face_indices`
-are a fallback when no invalid face is locatable. Native defeaturing is skipped
-for high-edge-count malformed faces because OCCT can run unbounded on that
-topology; use the rung report to decide whether a manual local patch is needed.
+a single malformed face. If that patch is BRep-clean and fails only because a
+small face fails refined tessellation after STEP round-trip, it can try a
+microscopic local relief cut around the reported sliver before moving on to
+targeted defeaturing on cleaned and raw topology. It prefers BRep-invalid faces
+located inside the recovery subprocess because STEP round-trips and cleanup can
+change face indices; explicit `face_indices` are a fallback when no invalid face
+is locatable. Native defeaturing is skipped for high-edge-count malformed faces
+because OCCT can run unbounded on that topology; use the rung report to decide
+whether a manual local patch is needed.
 If it returns `status: "candidate"`, inspect the named candidate with
 `validate("part_recover_candidate")`, `render_view(objects="part_recover_candidate")`,
 `measure("part_recover_candidate")`, and `shape_compare("part", "part_recover_candidate")`
@@ -442,6 +445,14 @@ same boundary with rung 4 option 2/3 or re-sewing that local face at a tighter,
 controlled tolerance before using destructive drop-and-sew. Then verify with the
 export gate, because the failure may only appear after STEP round-trip and finer
 tessellation.
+
+When the refined failure is a tiny inherited sliver and clean re-patching keeps
+failing, a microscopic relief cut can be acceptable as an advisory candidate:
+cut only around the locator's reported point, keep the cut sub-millimetre, and
+accept it only if the exact export gate is clean and the reported volume/topology
+delta is negligible relative to the requested edit. `recover_candidate()` has a
+guarded version of this for the specific case where its planar patch is already
+BRep-clean and the exact gate fails solely on refined tessellation.
 
 ---
 

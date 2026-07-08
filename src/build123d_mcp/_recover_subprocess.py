@@ -16,6 +16,9 @@ from typing import Any
 
 _DEFAULT_GATE_TIMEOUT_S = 35.0
 _EPS = 1e-9
+_MICRO_RELIEF_MAX_DEFECTS = 3
+_MICRO_RELIEF_FACE_AREA_MAX_MM2 = 2.0
+_MICRO_RELIEF_SIZES_MM = (0.15, 0.25, 0.4, 0.6)
 
 
 def _shape_summary(shape: Any) -> dict:
@@ -573,9 +576,166 @@ def _attempt_planar_wire_patch_rung(
             "patch_report": patch_report,
         },
     )
-    if candidate_entry.get("status") == "candidate":
-        candidate_entry["_candidate_shape"] = candidate
+    candidate_entry["_candidate_shape"] = candidate
     return candidate_entry
+
+
+def _is_refined_only_rejection(entry: dict) -> bool:
+    if entry.get("status") != "candidate_rejected":
+        return False
+    gate = entry.get("gate") or {}
+    mesh = gate.get("exact_mesh_gate") or {}
+    if not mesh.get("ok") or int(mesh.get("refined_untriangulated_faces") or 0) <= 0:
+        return False
+    for key in (
+        "mesh_nonmanifold_edges",
+        "mesh_open_edges",
+        "untriangulated_faces",
+        "mesh_nonmanifold_vertices",
+        "mesh_vertex_deflection_defects",
+    ):
+        if int(mesh.get(key) or 0):
+            return False
+    return bool((gate.get("fast_gate") or {}).get("passes_gate"))
+
+
+def _roundtrip_for_refined_locator(shape: Any) -> tuple[Any, list[dict]]:
+    from build123d import import_step
+
+    from build123d_mcp._locate_subprocess import _mesh_refined_untriangulated_faces
+    from build123d_mcp.tools.export import _write_step
+
+    with tempfile.TemporaryDirectory(prefix="b123d_recover_refined_") as work:
+        step = os.path.join(work, "candidate.step")
+        _write_step(shape, step)
+        roundtripped = import_step(step)
+    return roundtripped, _mesh_refined_untriangulated_faces(roundtripped)
+
+
+def _summarize_refined_defects(shape: Any, defects: list[dict]) -> tuple[list[dict], list[dict]]:
+    faces = _raw_faces(shape.wrapped)
+    selected = []
+    skipped = []
+    for defect in defects:
+        try:
+            idx = int(defect["face_index"])
+            if idx < 0 or idx >= len(faces):
+                raise IndexError(idx)
+            summary = _face_summary(faces[idx], idx)
+        except Exception as exc:  # noqa: BLE001
+            skipped.append({**defect, "skip_reason": f"could not summarize face: {exc}"})
+            continue
+        merged = {**defect, "face": summary}
+        if float(summary.get("area") or 0.0) > _MICRO_RELIEF_FACE_AREA_MAX_MM2:
+            merged["skip_reason"] = (
+                f"face area exceeds micro-relief limit "
+                f"({_MICRO_RELIEF_FACE_AREA_MAX_MM2} mm^2)"
+            )
+            skipped.append(merged)
+            continue
+        selected.append(merged)
+    return selected, skipped
+
+
+def _micro_relief_candidate(shape: Any, defects: list[dict], size_mm: float) -> Any:
+    from build123d import Box, Location
+
+    candidate = shape
+    for defect in defects:
+        where = defect.get("where")
+        if not isinstance(where, (list, tuple)) or len(where) != 3:
+            raise RuntimeError(f"refined defect lacks a usable location: {defect}")
+        cutter = Box(size_mm, size_mm, size_mm).move(Location(tuple(float(v) for v in where)))
+        candidate = candidate - cutter
+    try:
+        candidate = candidate.clean().fix()
+    except Exception:  # noqa: BLE001 - exact gate below decides whether this is usable
+        pass
+    return candidate
+
+
+def _attempt_micro_relief_rung(
+    rung: str,
+    base_candidate: Any,
+    source_summary: dict,
+    manifest: dict,
+    parent_rung: str,
+) -> dict:
+    entry: dict[str, Any] = {
+        "rung": rung,
+        "status": "skipped",
+        "parent_rung": parent_rung,
+        "reason": "parent candidate did not expose refined tessellation defects",
+    }
+    try:
+        roundtripped, defects = _roundtrip_for_refined_locator(base_candidate)
+    except Exception as exc:  # noqa: BLE001
+        entry["status"] = "failed"
+        entry["reason"] = f"{type(exc).__name__}: {exc}"
+        return entry
+
+    entry["refined_defects"] = defects
+    if not defects:
+        return entry
+    if len(defects) > _MICRO_RELIEF_MAX_DEFECTS:
+        entry["reason"] = (
+            f"micro relief is limited to {_MICRO_RELIEF_MAX_DEFECTS} refined faces; "
+            f"found {len(defects)}"
+        )
+        return entry
+
+    selected, skipped = _summarize_refined_defects(roundtripped, defects)
+    entry["selected_refined_defects"] = selected
+    if skipped:
+        entry["skipped_refined_defects"] = skipped
+    if not selected:
+        entry["reason"] = "no refined defects were small enough for micro relief"
+        return entry
+
+    attempts = []
+    base_summary = _shape_summary(roundtripped)
+    for size in _MICRO_RELIEF_SIZES_MM:
+        try:
+            candidate = _micro_relief_candidate(roundtripped, selected, size)
+        except Exception as exc:  # noqa: BLE001
+            attempts.append(
+                {
+                    "relief_size_mm": size,
+                    "status": "failed",
+                    "reason": f"{type(exc).__name__}: {exc}",
+                }
+            )
+            continue
+        attempt = _candidate_entry(
+            rung,
+            candidate,
+            source_summary,
+            manifest,
+            extra={
+                "parent_rung": parent_rung,
+                "relief_size_mm": size,
+                "selected_refined_defects": selected,
+                "roundtrip_deltas": _deltas(base_summary, _shape_summary(candidate)),
+            },
+        )
+        attempts.append(
+            {
+                "relief_size_mm": size,
+                "status": attempt.get("status"),
+                "gate": attempt.get("gate"),
+                "deltas": attempt.get("deltas"),
+                "roundtrip_deltas": attempt.get("roundtrip_deltas"),
+            }
+        )
+        if attempt.get("status") == "candidate":
+            attempt["attempts"] = attempts
+            attempt["_candidate_shape"] = candidate
+            return attempt
+
+    entry["status"] = "candidate_rejected"
+    entry["reason"] = "no micro-relief size produced a candidate that passed the exact gate"
+    entry["attempts"] = attempts
+    return entry
 
 
 def _attempt_defeature_rung(
@@ -702,8 +862,19 @@ def _attempt(manifest: dict) -> dict:
         source_summary,
         manifest,
     )
+    planar_candidate = entry.get("_candidate_shape")
     if accept_if_candidate(entry):
         return report
+    if planar_candidate is not None and _is_refined_only_rejection(entry):
+        entry = _attempt_micro_relief_rung(
+            "planar_wire_patch_micro_relief",
+            planar_candidate,
+            source_summary,
+            manifest,
+            "planar_wire_patch_invalid_face",
+        )
+        if accept_if_candidate(entry):
+            return report
 
     # Rung 3: clean/fix first, then locate invalid faces on that topology and
     # defeature them. Fixture 217 needs this; raw defeature leaves it invalid.

@@ -186,10 +186,11 @@ def recover_candidate(
     """Try a bounded advisory repair and register a named candidate.
 
     The ladder currently tries conservative cleanup, a bounded planar-wire patch
-    for one malformed face, then targeted defeaturing of BRep-invalid faces on
-    cleaned and raw topology. A produced candidate is stored under ``store_as``
-    only after the exact structural gate passes, while ``current_shape`` and the
-    source object are left unchanged.
+    for one malformed face, a guarded micro-relief cleanup when that patch fails
+    solely on refined tessellation, then targeted defeaturing of BRep-invalid
+    faces on cleaned and raw topology. A produced candidate is stored under
+    ``store_as`` only after the exact structural gate passes, while
+    ``current_shape`` and the source object are left unchanged.
     """
 
     shape, err = _resolve_shape(session, object_name)
