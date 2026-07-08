@@ -365,6 +365,73 @@ def _mesh_vertex_deflection_defects(shape) -> list:
     return out
 
 
+def _mesh_refined_untriangulated_faces(shape) -> list:
+    """Faces that tessellate at the gate's base deflection but fail at base/4.
+
+    This mirrors the refined probe in ``tools.validate._mesh_defects_exact`` and
+    reports a face center for repair. It deliberately does not stitch the mesh; the
+    defect is simply that OCC cannot provide a per-face triangulation at the finer
+    tolerance a downstream consumer may request.
+    """
+    from OCP.BRep import BRep_Tool
+    from OCP.BRepGProp import BRepGProp
+    from OCP.BRepMesh import BRepMesh_IncrementalMesh
+    from OCP.GProp import GProp_GProps
+    from OCP.TopAbs import TopAbs_FACE
+    from OCP.TopExp import TopExp
+    from OCP.TopLoc import TopLoc_Location
+    from OCP.TopoDS import TopoDS
+    from OCP.TopTools import TopTools_IndexedMapOfShape
+
+    from build123d_mcp.tools.validate import (
+        _REFINED_UNTRIANGULATED_FACTOR,
+        _REFINED_UNTRIANGULATED_MAX_TRIS,
+    )
+
+    occ = shape.wrapped
+    bb = shape.bounding_box()
+    diag = math.dist((bb.min.X, bb.min.Y, bb.min.Z), (bb.max.X, bb.max.Y, bb.max.Z))
+    if diag <= 0:
+        return []
+    base_deflection = min(0.5, max(0.005, diag * 1e-3))
+    refined_deflection = base_deflection / _REFINED_UNTRIANGULATED_FACTOR
+    BRepMesh_IncrementalMesh(occ, refined_deflection, False, 0.5, True)
+
+    faces = TopTools_IndexedMapOfShape()
+    TopExp.MapShapes_s(occ, TopAbs_FACE, faces)
+    out = []
+    n_tris = 0
+    for fi in range(1, faces.Size() + 1):
+        face = TopoDS.Face_s(faces.FindKey(fi))
+        loc = TopLoc_Location()
+        tri = BRep_Tool.Triangulation_s(face, loc)
+        if tri is not None:
+            n_tris += tri.NbTriangles()
+            continue
+        g = GProp_GProps()
+        BRepGProp.SurfaceProperties_s(face, g)
+        c = g.CentreOfMass()
+        out.append(
+            {
+                "kind": "mesh_refined_untriangulated_face",
+                "face_index": fi,
+                "where": [round(c.X(), 3), round(c.Y(), 3), round(c.Z(), 3)],
+                "deflection_mm": round(refined_deflection, 6),
+                "hint": (
+                    "this face meshes at the base gate deflection but fails at a finer "
+                    "tolerance; treat it as a fragile/unmeshable sliver and re-patch or "
+                    "re-sew the local face before export"
+                ),
+            }
+        )
+    if n_tris > _REFINED_UNTRIANGULATED_MAX_TRIS and not out:
+        raise RuntimeError(
+            f"shape too large for the refined untriangulated-face locator ({n_tris} "
+            f"triangles > {_REFINED_UNTRIANGULATED_MAX_TRIS}) — skipped, other locators still ran"
+        )
+    return out
+
+
 def collect_defects(shape) -> list:
     """Run every locator on a build123d shape and return the defect list.
 
@@ -392,6 +459,10 @@ def collect_defects(shape) -> list:
         defects.append({"kind": "locator_error", "detail": repr(exc)[:200]})
     try:
         defects += _mesh_vertex_deflection_defects(shape)
+    except Exception as exc:  # noqa: BLE001
+        defects.append({"kind": "locator_error", "detail": repr(exc)[:200]})
+    try:
+        defects += _mesh_refined_untriangulated_faces(shape)
     except Exception as exc:  # noqa: BLE001
         defects.append({"kind": "locator_error", "detail": repr(exc)[:200]})
     return defects

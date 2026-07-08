@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.73.dev0
+
+### Fixed
+
+- **The exact mesh gate now catches faces that only fail to tessellate at a finer tolerance.** `_mesh_defects_exact()` still performs its existing base-deflection topology stitch first, but now follows it with a budget-gated base/4 probe whose only job is checking that every face still has an OCC triangulation. This keeps the default validation generic — it is a tolerance-sensitivity check, not benchmark-specific logic — while catching fragile sliver/repair-patch faces that pass the coarse gate and fail in downstream consumers using a finer mesh. The report gains `refined_untriangulated_faces`, the isolated gate subprocess and export warning path carry the new count, and `locate_gate_defects()` can now return `mesh_refined_untriangulated_face` with the face center for targeted repair.
+
 ## v0.3.72
 
 ### Changed

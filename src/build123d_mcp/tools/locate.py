@@ -51,7 +51,9 @@ def locate_gate_defects(session, object_name: str = "") -> str:
     than the gate's own exact topology-stitched check; re-check with the export
     gate after a fix), the mesh self-touches a CAD scorer rejects —
     ``mesh_nonmanifold_edge`` and ``mesh_nonmanifold_vertex`` (corner-to-corner
-    touch) — and ``mesh_vertex_deflection_defect`` (a tessellated edge endpoint
+    touch), ``mesh_refined_untriangulated_face`` (a face that only fails to
+    tessellate at a finer tolerance) — and ``mesh_vertex_deflection_defect`` (a
+    tessellated edge endpoint
     that misses its BREP vertex by more than the mesh deflection — a
     patched/healed face whose boundary is topologically closed but
     geometrically off-vertex; BRepCheck and a coordinate weld both miss this,
