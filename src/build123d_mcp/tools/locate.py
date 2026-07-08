@@ -120,7 +120,7 @@ _DEFECT_PRIORITY = (
 
 def _enrich_defect(defect: dict) -> dict:
     out = dict(defect)
-    meta = _DEFECT_DIAGNOSTICS.get(out.get("kind"), {})
+    meta = _DEFECT_DIAGNOSTICS.get(str(out.get("kind", "?")), {})
     for key in ("diagnostic_class", "repair_family", "next_step"):
         if key in meta:
             out.setdefault(key, meta[key])
