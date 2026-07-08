@@ -1,8 +1,8 @@
 """Out-of-process mesh-validity check for the export gate.
 
 Run as ``python -m build123d_mcp._gate_subprocess <step_path>``. Loads the STEP,
-runs the exact mesh check (open-edge ladder + non-manifold + face-tessellation)
-with NO internal time deadline, and prints the result as a single
+runs the exact mesh check (open-edge ladder + non-manifold + base/refined
+face-tessellation) with NO internal time deadline, and prints the result as a single
 ``GATE_RESULT:{...}`` line on stdout.
 
 Why a separate process: the dominant cost is OCC ``BRepMesh`` tessellation, an
@@ -42,7 +42,7 @@ def main() -> None:
         # deadline=inf: no in-process time bail — the parent's subprocess timeout
         # bounds us, so the triangle ceiling can be much higher than the in-worker
         # checks' (#381) — it's a memory/sanity backstop here, not a time proxy.
-        nm, open_edges, untri, nmv, vdefl, ok = _mesh_defects_exact(
+        nm, open_edges, untri, refined_untri, nmv, vdefl, ok = _mesh_defects_exact(
             shape, max_triangles=_EXACT_ISOLATED_MAX_TRIS, deadline=float("inf")
         )
         print(
@@ -52,6 +52,7 @@ def main() -> None:
                     "nm": nm,
                     "open": open_edges,
                     "untri": untri,
+                    "refined_untri": refined_untri,
                     "nmv": nmv,
                     "vdefl": vdefl,
                     "ok": ok,

@@ -111,8 +111,10 @@ def test_clean_solids_pass_exact_with_zero_open_edges(session, code):
     report = _gate_report(session.objects["p"], exact=True)
     assert "mesh_open_edges" in report
     assert "untriangulated_faces" in report
+    assert "refined_untriangulated_faces" in report
     assert report["mesh_open_edges"] == 0
     assert report["untriangulated_faces"] == 0
+    assert report["refined_untriangulated_faces"] == 0
     assert report["passes_gate"] is True
 
 
@@ -379,8 +381,75 @@ def test_mesh_defects_exact_no_false_nm_vertex_on_clean_solids():
     # The vertex check runs on a coordinate-welded mesh, so poles/seams of a
     # sphere must not register as pinches (#298 regression guard).
     for shape in (Box(10, 10, 10), Sphere(8)):
-        nm_e, open_e, untri, nmv, vdefl, ok = _mesh_defects_exact(shape)
-        assert ok and nmv == 0 and vdefl == 0
+        nm_e, open_e, untri, refined_untri, nmv, vdefl, ok = _mesh_defects_exact(shape)
+        assert ok and refined_untri == 0 and nmv == 0 and vdefl == 0
+
+
+def test_mesh_defects_exact_detects_refined_untriangulated_face(monkeypatch):
+    """A face can tessellate at the gate's base deflection but fail when the mesh is
+    refined. The refined probe must report that as its own defect class instead of
+    relying on the open-edge ladder, which only escalates when the base mesh is open."""
+    import OCP.BRepMesh as brep_mesh
+    from build123d import Box
+    from OCP.BRep import BRep_Tool
+
+    from build123d_mcp.tools.validate import _mesh_defects_exact
+
+    box = Box(10, 10, 10)
+    state = {"deflection": None, "missed": False}
+    orig_mesh = brep_mesh.BRepMesh_IncrementalMesh
+    orig_tri = BRep_Tool.Triangulation_s
+
+    def _tracking_mesh(*args):
+        if len(args) >= 2 and isinstance(args[1], (int, float)):
+            state["deflection"] = float(args[1])
+        return orig_mesh(*args)
+
+    def _refined_only_missing_tri(face, loc):
+        if state["deflection"] is not None and state["deflection"] < 0.005 and not state["missed"]:
+            state["missed"] = True
+            return None
+        return orig_tri(face, loc)
+
+    monkeypatch.setattr(brep_mesh, "BRepMesh_IncrementalMesh", _tracking_mesh)
+    monkeypatch.setattr(BRep_Tool, "Triangulation_s", staticmethod(_refined_only_missing_tri))
+
+    nm_e, open_e, untri, refined_untri, nmv, vdefl, ok = _mesh_defects_exact(box)
+    assert ok
+    assert (nm_e, open_e, untri, nmv, vdefl) == (0, 0, 0, 0, 0)
+    assert refined_untri == 1
+
+
+def test_gate_report_fails_on_refined_untriangulated_face(monkeypatch):
+    import OCP.BRepMesh as brep_mesh
+    from build123d import Box
+    from OCP.BRep import BRep_Tool
+
+    from build123d_mcp.tools.validate import _gate_report
+
+    state = {"deflection": None, "missed": False}
+    orig_mesh = brep_mesh.BRepMesh_IncrementalMesh
+    orig_tri = BRep_Tool.Triangulation_s
+
+    def _tracking_mesh(*args):
+        if len(args) >= 2 and isinstance(args[1], (int, float)):
+            state["deflection"] = float(args[1])
+        return orig_mesh(*args)
+
+    def _refined_only_missing_tri(face, loc):
+        if state["deflection"] is not None and state["deflection"] < 0.005 and not state["missed"]:
+            state["missed"] = True
+            return None
+        return orig_tri(face, loc)
+
+    monkeypatch.setattr(brep_mesh, "BRepMesh_IncrementalMesh", _tracking_mesh)
+    monkeypatch.setattr(BRep_Tool, "Triangulation_s", staticmethod(_refined_only_missing_tri))
+
+    report = _gate_report(Box(10, 10, 10), exact=True)
+    assert report["passes_gate"] is False
+    assert report["untriangulated_faces"] == 0
+    assert report["refined_untriangulated_faces"] == 1
+    assert any("finer mesh deflection" in r for r in report["reasons"])
 
 
 def test_mesh_defects_exact_detects_vertex_deflection(monkeypatch):
@@ -416,10 +485,10 @@ def test_mesh_defects_exact_detects_vertex_deflection(monkeypatch):
         return p
 
     monkeypatch.setattr(BRep_Tool, "Pnt_s", staticmethod(_lying_pnt_s))
-    nm_e, open_e, untri, nmv, vdefl, ok = _mesh_defects_exact(box)
+    nm_e, open_e, untri, refined_untri, nmv, vdefl, ok = _mesh_defects_exact(box)
     assert ok
     assert vdefl == 1
-    assert nm_e == 0 and untri == 0 and nmv == 0
+    assert nm_e == 0 and untri == 0 and refined_untri == 0 and nmv == 0
 
 
 def test_mesh_defects_exact_open_ladder_catches_vertex_deflection_too(monkeypatch):
@@ -453,9 +522,10 @@ def test_mesh_defects_exact_open_ladder_catches_vertex_deflection_too(monkeypatc
         return p
 
     monkeypatch.setattr(BRep_Tool, "Pnt_s", staticmethod(_lying_pnt_s))
-    nm_e, open_e, untri, nmv, vdefl, ok = _mesh_defects_exact(shell)
+    nm_e, open_e, untri, refined_untri, nmv, vdefl, ok = _mesh_defects_exact(shell)
     assert ok
     assert open_e == 4  # the missing face's 4 rim edges — unaffected by the guard
+    assert refined_untri == 0
     assert vdefl == 1  # only reachable via the ladder's own guard at this magnitude
 
 
@@ -488,9 +558,10 @@ def test_mesh_defects_exact_counts_multiple_ladder_only_vertices(monkeypatch):
         return p
 
     monkeypatch.setattr(BRep_Tool, "Pnt_s", staticmethod(_lying_pnt_s))
-    nm_e, open_e, untri, nmv, vdefl, ok = _mesh_defects_exact(shell)
+    nm_e, open_e, untri, refined_untri, nmv, vdefl, ok = _mesh_defects_exact(shell)
     assert ok
     assert open_e == 4
+    assert refined_untri == 0
     assert vdefl == 2  # both distinct vertices counted, not capped at 1
 
 
@@ -515,9 +586,10 @@ def test_mesh_defects_exact_no_double_count_when_base_and_ladder_agree(monkeypat
         return p
 
     monkeypatch.setattr(BRep_Tool, "Pnt_s", staticmethod(_lying_pnt_s))
-    nm_e, open_e, untri, nmv, vdefl, ok = _mesh_defects_exact(shell)
+    nm_e, open_e, untri, refined_untri, nmv, vdefl, ok = _mesh_defects_exact(shell)
     assert ok
     assert open_e == 4
+    assert refined_untri == 0
     assert vdefl == 1  # same vertex found twice (base + ladder), deduped to 1
 
 
@@ -531,9 +603,9 @@ def test_mesh_gate_subprocess_valid_step(tmp_path):
 
     p = tmp_path / "box.step"
     export_step(Box(10, 10, 10), str(p))
-    # A clean solid: 0 nm-edge, 0 open, 0 untriangulated, 0 nm-vertex, 0
-    # vertex-deflection defects, ok=True.
-    assert _run_mesh_gate_subprocess(str(p), timeout=120) == (0, 0, 0, 0, 0, True)
+    # A clean solid: 0 nm-edge, 0 open, 0 base/refined untriangulated, 0
+    # nm-vertex, 0 vertex-deflection defects, ok=True.
+    assert _run_mesh_gate_subprocess(str(p), timeout=120) == (0, 0, 0, 0, 0, 0, True)
 
 
 def test_mesh_gate_subprocess_timeout_returns_none(tmp_path):

@@ -333,7 +333,7 @@ def export_file(session, filename: str, format: str = "step", object_name: str =
             report = _gate_report(
                 gate_shape,
                 exact=True,
-                mesh_override=_mesh if _mesh is not None else (0, 0, 0, 0, 0, False),
+                mesh_override=_mesh if _mesh is not None else (0, 0, 0, 0, 0, 0, False),
             )
             if not report["passes_gate"]:
                 suffix += (
@@ -346,7 +346,7 @@ def export_file(session, filename: str, format: str = "step", object_name: str =
                 suffix += (
                     "\n⚠ NOTE — the part was too large to mesh-check within the time "
                     "budget, so only B-rep checks ran; a mesh-level defect (open/"
-                    "non-manifold) would not be caught here."
+                    "non-manifold/refined face-tessellation) would not be caught here."
                 )
         else:
             # STL-only export (no STEP path to hand the subprocess): gate in-process.

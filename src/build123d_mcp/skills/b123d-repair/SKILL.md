@@ -27,6 +27,10 @@ Do not apply repairs blind. First identify the defect class and its location.
    - `mesh open edge(s)` / `mesh non-manifold` / `face(s) failed to
      tessellate` **with `brep_valid: true`** → a mesh-only defect (a
      ~zero-area unmeshable face, or a self-touch) — rung 5.
+   - `face(s) failed to tessellate at a finer mesh deflection`
+     **with `brep_valid: true`** → a tolerance-sensitive mesh-only defect:
+     the face meshes at the default gate deflection but fails when a downstream
+     consumer asks for a finer mesh — rung 5, using the re-patch/re-sew variant.
    - `vertex(es) where a tessellated edge endpoint misses its BREP vertex`
      **with `brep_valid: true`** → a mesh-only defect too, but a different
      one from the two above: a previously-patched/healed face's boundary is
@@ -398,6 +402,15 @@ not an unmeshable one (option 4's drop-and-sew is the wrong tool here): re-patch
 (rung 4 option 2 or 3) or re-sew at small tolerance (option 5) that exact face
 at a tighter tolerance than whatever repair left it in this state, then
 re-verify with the export gate.
+
+A **refined untriangulated face** (`mesh_refined_untriangulated_face` from
+`locate_gate_defects()`) is similarly a tolerance-sensitive face-quality problem:
+the base mesh can hide it, but a finer downstream tessellation cannot. Treat the
+reported face as a fragile sliver or low-quality patch. Prefer re-patching the
+same boundary with rung 4 option 2/3 or re-sewing that local face at a tighter,
+controlled tolerance before using destructive drop-and-sew. Then verify with the
+export gate, because the failure may only appear after STEP round-trip and finer
+tessellation.
 
 ---
 

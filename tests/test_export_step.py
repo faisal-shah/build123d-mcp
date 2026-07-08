@@ -44,6 +44,21 @@ def test_export_step_writes_valid_solid(session, tmp_path, monkeypatch):
     assert len(import_step(str(out)).solids()) == 1
 
 
+def test_export_skipped_mesh_warning_mentions_refined_tessellation(session, tmp_path, monkeypatch):
+    """If the isolated mesh gate times out, export's warning must name every mesh
+    class that was skipped, including the refined face-tessellation probe."""
+    import build123d_mcp.tools.validate as validate_tools
+
+    monkeypatch.chdir(tmp_path)
+    execute_code(session, "show(Box(10, 10, 10), 'part')")
+    monkeypatch.setattr(validate_tools, "_run_mesh_gate_subprocess", lambda *a, **k: None)
+
+    out = export_file(session, "out", "step", object_name="part")
+
+    assert "too large to mesh-check" in out
+    assert "refined face-tessellation" in out
+
+
 def test_export_step_falls_back_when_high_level_writer_fails(session, tmp_path, monkeypatch):
     """When build123d's export_step raises (the 0.11.0 regression), export still
     produces a valid, reimportable STEP via the raw STEPControl_Writer."""
