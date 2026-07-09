@@ -23,10 +23,23 @@ Before editing, capture what exists.
    print(measure(part))
    ```
 
-5. Run the MCP `validate()` tool on the registered baseline. If the baseline
-   already fails the gate, stop and switch to
-   `build123d://skill/repair`. Do not combine a feature edit with geometry
-   repair unless the requested edit is the repair.
+5. Run the MCP `validate()` tool on the registered baseline. For tasks whose
+   deliverable is an exported solid, or where downstream CAD consumers will read
+   a STEP/STL/BREP file, also export the unchanged baseline to a safe throwaway
+   path such as `_baseline_gate.step` and read the export gate result. The
+   throwaway baseline gate must never use the final deliverable path, such as
+   `output.step`. For script-only work, a successful rebuild plus `validate()`
+   is the baseline proof unless the task later requires a file export.
+6. If the baseline fails the relevant proof (`validate()` for script-only work;
+   `validate()` plus the throwaway export gate for exported-solid work), stop
+   and switch to `build123d://skill/repair`. Until a repaired baseline passes
+   that same proof, the only geometry-changing operations allowed are minimal
+   baseline fixups. Do not move, cut, extend, remove, or replace the requested
+   target feature while the baseline is still invalid. Do not combine a feature
+   edit with geometry repair unless the requested edit is the repair.
+7. After the baseline passes the relevant proof, save a snapshot such as
+   `save_snapshot("valid_baseline")`. Only then begin the requested feature or
+   parameter edit.
 
 For file-based work, keep the source of truth in the Python file. The MCP
 session is the proving ground, not the only copy of the edit.
@@ -140,6 +153,16 @@ Then choose the evidence that matches the edit:
 - shape should otherwise match a baseline: run
   `compare(a="before", b="edited", kind="shape")`
 
+For imported B-reps, `compare(kind="shape")` can have noisy mesh localisation
+after a valid defeature or analytic face extension. Do not throw away a clean
+validated candidate solely because compare reports spread regions. First prove
+the exact delta directly: no added material when only removal was requested, the
+delta bounding box sits on the intended feature, the target faces are gone or
+changed as requested, and protected feature counts/dimensions are unchanged. If
+that evidence is clean, keep the validated defeatured result instead of replacing
+it with a raw boolean that preserves old face partitioning but creates extra
+seam faces.
+
 `export()` is the final gate because it checks the written and re-imported STEP.
 A `validate()` pass in memory is useful but not the final acceptance proof.
 If the edited shape fails this gate, call `repair_advice(error_text=..., goal=...)`
@@ -204,6 +227,14 @@ Verify with `compare(a="shaft", b="bore_part", kind="fit")` or a measured sectio
 Prefer removing the feature's construction block over adding material back with
 a compensating boolean. If you must patch a removed cut, prove the final face and
 volume match the intended design, then export-gate the result.
+
+For imported fillet or chamfer removal, treat the job as defeaturing when the
+rounded faces are explicit analytic patches. Identify the exact torus, cone, or
+small blend faces, remove those faces, and let adjacent cylinders/planes extend
+or merge. A valid defeatured result with fewer/cleaner faces is usually preferable
+to a topology-preserving cutter that leaves extra cylindrical bands or seam faces.
+Accept the defeature only after the written export gate passes and the delta
+proof shows the removed material is localized to the requested fillet/chamfer.
 
 ### Topology-Sensitive Edits
 
