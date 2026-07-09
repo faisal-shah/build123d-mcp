@@ -17,6 +17,14 @@ InProcessSession (end of this module) is the no-subprocess fallback for MCP
 hosts that block child-process creation (#143). It trades away the isolation
 above: the Session and OCC run inside the server process, with no crash
 containment and no operation timeouts.
+
+WorkerSession also falls back to that in-process path *automatically* when the
+worker subprocess cannot be (re)started — the host blocks or breaks
+multiprocessing spawn, so the worker never signals ready. Rather than erroring
+every tool call ("Worker was not running; restarted") for the life of the
+server, it builds the Session in-process, warns once, and keeps serving. Opt
+out with BUILD123D_NO_WORKER_FALLBACK=1 to fail hard instead (see
+_worker_fallback_enabled).
 """
 
 import functools
@@ -30,6 +38,26 @@ from typing import Any, NamedTuple, TypeVar, cast
 from build123d_mcp.tools._budget import OP_BUDGET_FLOOR_S
 
 _WORKER_READY_TIMEOUT = 60  # seconds to wait for worker import + ready signal
+
+
+def _worker_fallback_enabled() -> bool:
+    """Whether a failed worker (re)start should transparently degrade to in-process
+    execution instead of erroring every tool call.
+
+    On by default so a sandboxed host that blocks or breaks multiprocessing spawn
+    (#143) still gets a working server. This is notably the Copilot/Codex CLI on
+    Windows: the initial worker boots and signals ready, but every *restart* worker
+    (spawned from a request thread once the server is running) hangs in bootstrap
+    without ever importing build123d and is killed at the ready timeout, so from the
+    first worker death onward every execute/measure/render returns "Worker was not
+    running; restarted". Degrading keeps the server usable there.
+
+    Set BUILD123D_NO_WORKER_FALLBACK=1 to keep the strict, hard-fail behaviour — e.g.
+    a benchmark harness that must have crash containment and per-op timeouts.
+    """
+    import os
+
+    return os.environ.get("BUILD123D_NO_WORKER_FALLBACK", "").lower() not in ("1", "true", "yes")
 
 
 def _build_session(
@@ -427,7 +455,20 @@ class WorkerSession:
         # crash skips the append), so replay can't re-hit it. Only execute()-driven
         # state is covered — not snapshots or import_cad_file/load_part geometry. (#359)
         self._execute_history: list[str] = []
-        self._start_worker()
+        # In-process fallback state (#143). If the worker subprocess cannot be
+        # (re)started — a sandboxed host that blocks or breaks multiprocessing
+        # spawn — the session transparently degrades to running the Session in
+        # this process instead of erroring every tool call. Populated lazily by
+        # _activate_in_process_fallback(); until then the worker path is used.
+        self._in_process = False
+        self._session: Any = None
+        self._library_index: Any = None
+        try:
+            self._start_worker()
+        except Exception as exc:  # noqa: BLE001 - degrade rather than crash the server at startup
+            if not _worker_fallback_enabled():
+                raise
+            self._activate_in_process_fallback(exc)
 
     @property
     def has_library(self) -> bool:
@@ -577,16 +618,41 @@ class WorkerSession:
         """Start a fresh worker and replay the execute() history into it. Returns
         (restored, total). History is truncated to the steps actually re-applied so
         it stays consistent with the live worker. Lock held. If the worker can't be
-        started at all, the history is cleared and (0, 0) returned."""
+        started at all, the session degrades to in-process (#143) and the history is
+        replayed there instead; with the fallback opted out, the history is cleared
+        and (0, 0) returned."""
         try:
             self._start_worker()
-        except Exception:  # noqa: BLE001 - host can't spawn a worker (e.g. #143)
-            self._execute_history.clear()
-            return 0, 0
+        except Exception as exc:  # noqa: BLE001 - host can't spawn a worker (e.g. #143)
+            if not _worker_fallback_enabled():
+                self._execute_history.clear()
+                return 0, 0
+            # Degrade to in-process and rebuild prior state there, so a worker death
+            # that forces the fallback costs the dying op — not the whole session.
+            history = list(self._execute_history)
+            self._activate_in_process_fallback(exc)
+            restored = self._replay_execute_history_in_process(history)
+            self._execute_history = history[:restored]
+            return restored, len(history)
         history = list(self._execute_history)  # snapshot: a concurrent reset() can't truncate it
         restored = self._replay_execute_history(history)
         self._execute_history = history[:restored]
         return restored, len(history)
+
+    def _replay_execute_history_in_process(self, history: list[str]) -> int:
+        """Re-run `history` against the in-process Session after a #143 degrade, so a
+        worker death that triggers the fallback rebuilds prior state instead of wiping
+        it. There is no pipe and no per-op timeout in degraded mode, so this is a plain
+        best-effort re-run that keeps the rebuilt prefix — it stops at the first step
+        that errors, mirroring _replay_execute_history's prefix preservation. Lock
+        held."""
+        restored = 0
+        for code in history:
+            result = self._in_process_call("execute", {"code": code})
+            if isinstance(result, str) and result.startswith("Error:"):
+                break
+            restored += 1
+        return restored
 
     def _recovery_detail(self, restored: int, total: int) -> str:
         # "replayed", not "restored": replay re-runs your code, so snapshots and
@@ -615,9 +681,59 @@ class WorkerSession:
         with self._lock:
             return self._do_call(op, args, timeout)
 
+    def _activate_in_process_fallback(self, exc: Exception) -> None:
+        """Degrade this session to in-process execution after the worker subprocess
+        could not be (re)started (#143).
+
+        Builds the Session in this process — mirroring InProcessSession — and warns
+        once. Idempotent: a second trigger (e.g. a later restart attempt) is a no-op.
+        Called under the request lock from the restart paths, or unlocked from
+        __init__ before any request can arrive.
+        """
+        if self._in_process:
+            return
+        self._session, self._library_index = _build_session(
+            self._library_path,
+            self._exec_timeout,
+            self._allow_all_imports,
+            self._extra_allowed_imports,
+            self._no_sandbox,
+        )
+        self._in_process = True
+        import sys as _sys
+
+        print(
+            "WARNING: build123d-mcp worker subprocess could not be started "
+            f"({exc}); falling back to in-process execution for the rest of this "
+            "session (#143). The CAD session now runs inside the server process "
+            "with no crash containment and no operation timeouts. Select this mode "
+            "explicitly with --in-process / BUILD123D_IN_PROCESS=1 to silence this "
+            "warning, or set BUILD123D_NO_WORKER_FALLBACK=1 to fail hard instead.",
+            file=_sys.stderr,
+        )
+
+    def _in_process_call(self, op: str, args: dict) -> Any:
+        # Run the op against the in-process Session and normalise tool exceptions to
+        # RuntimeError("TypeName: message"), matching worker_main's error envelope so
+        # the degraded path has the same error contract as the worker path. Shared
+        # with InProcessSession. The base _call lock is held, so the single OCC
+        # kernel is never entered re-entrantly. (#322)
+        try:
+            return _dispatch(self._session, op, args, self._library_index)
+        except Exception as exc:
+            raise RuntimeError(f"{type(exc).__name__}: {exc}") from exc
+
     def _do_call(self, op: str, args: dict, timeout: int) -> Any:
+        if self._in_process:
+            return self._in_process_call(op, args)
         if not self._proc.is_alive():
             restored, n = self._restart_and_replay()
+            if self._in_process:
+                # The restart failed and the session degraded to in-process (#143).
+                # Run the op here rather than erroring: the worker is unrecoverable on
+                # this host, so surfacing "Worker was not running; restarted" on every
+                # call would wedge every tool for the life of the server.
+                return self._in_process_call(op, args)
             raise RuntimeError(
                 f"Worker was not running; restarted — {self._recovery_detail(restored, n)}."
             )
@@ -694,6 +810,8 @@ class WorkerSession:
 
     def reset(self) -> str:
         self._execute_history.clear()
+        if self._in_process:
+            return self._call("reset", {}, _SHORT_TIMEOUT)
         if not self._proc.is_alive():
             self._start_worker()
             return "Session reset."
@@ -986,13 +1104,7 @@ class InProcessSession(WorkerSession):
         return self._call("reset", {}, _SHORT_TIMEOUT)
 
     def _do_call(self, op: str, args: dict, timeout: int) -> Any:
-        # Same error contract as the worker path: tool exceptions surface as
-        # RuntimeError("TypeName: message"), mirroring worker_main's error
-        # envelope. (Session.execute() handles ExecutionTimeout internally
-        # and returns an error string, so no special-casing is needed here.)
-        # Inherits the base _call's lock, so concurrent requests can't run the
-        # one shared Session/OCC kernel re-entrantly. (#322)
-        try:
-            return _dispatch(self._session, op, args, self._library_index)
-        except Exception as exc:
-            raise RuntimeError(f"{type(exc).__name__}: {exc}") from exc
+        # Explicit in-process mode (--in-process / BUILD123D_IN_PROCESS=1). Uses the
+        # same dispatch + error contract as the worker path's automatic #143 fallback;
+        # see WorkerSession._in_process_call.
+        return self._in_process_call(op, args)

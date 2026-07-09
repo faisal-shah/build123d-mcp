@@ -206,6 +206,9 @@ def _stubbed_session(conn, alive=True, history=None):
     ws._exec_timeout = 120
     ws._lock = threading.Lock()
     ws._execute_history = list(history or [])
+    ws._in_process = False
+    ws._session = None
+    ws._library_index = None
     ws._kill_worker = lambda: None
     ws._start_worker = lambda: None
     return ws

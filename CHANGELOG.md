@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.76
+
+### Fixed
+
+- **The server now falls back to in-process mode automatically when the worker subprocess cannot be (re)started, instead of erroring on every tool call.** On a host that blocks or breaks `multiprocessing` spawn, the worker never signals ready. The most common instance is the Copilot/Codex CLI on Windows: the initial worker boots and answers, but every restart worker (spawned from a request thread once the server is running) hangs in bootstrap without ever importing build123d, and is killed at the 60s ready timeout. From the first worker death onward, `execute`, `measure`, `render_view`, and every other worker-backed tool returned "Worker was not running; restarted — the session had no prior steps, so it is now empty", while lightweight parent-served calls like `version` kept working, so the server looked half-alive rather than plainly misconfigured. `--in-process` / `BUILD123D_IN_PROCESS=1` already existed as a manual escape hatch, but nothing in the error text pointed a user to it, and a startup-only probe would not have caught this variant since the first worker starts fine and only restarts fail. `WorkerSession` now catches a failed `_start_worker()` (both at construction and on every restart), builds the `Session` in the server process the way `InProcessSession` does, replays the parent-side execute() history into it so prior state survives the switch, warns once on stderr, and keeps serving. Set `BUILD123D_NO_WORKER_FALLBACK=1` to keep the strict "must have an isolated worker" contract, since the degraded mode has no crash containment and no per-op timeouts (a benchmark harness may prefer the hard failure). The in-process dispatch body is now shared between the automatic fallback and the explicit `InProcessSession` so the two paths cannot drift. Thanks @faisal-shah.
+
 ## v0.3.73
 
 ### Fixed
