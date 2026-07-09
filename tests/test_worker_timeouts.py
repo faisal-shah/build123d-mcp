@@ -141,6 +141,23 @@ def test_shape_compare_keeps_export_floor():
     assert record == [("shape_compare", _EXPORT_TIMEOUT)]
 
 
+def test_compare_routes_to_underlying_timeout_tiers():
+    record = []
+    ws = _proxy_session(record, exec_timeout=300)
+
+    ws.compare("a", "b", kind="shape")
+    ws.compare("a", "b", kind="fit")
+    ws.compare("a", "b", kind="align")
+    ws.compare("snap", kind="snapshot")
+
+    assert record == [
+        ("shape_compare", 300),
+        ("clearance", 300),
+        ("align_check", _GEOMETRY_TIMEOUT),
+        ("diff_snapshot", _GEOMETRY_TIMEOUT),
+    ]
+
+
 def test_bookkeeping_ops_keep_short_timeout():
     record = []
     ws = _proxy_session(record)

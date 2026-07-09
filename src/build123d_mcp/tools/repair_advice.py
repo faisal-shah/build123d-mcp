@@ -51,7 +51,7 @@ _BASELINE_GATE = Recipe(
         "save_snapshot('before_repair')",
         "validate(part) -> locate_gate_defects(part) -> execute(candidate repair)",
         "export(part_candidate, 'step') as the acceptance gate, not validate() alone",
-        "shape_compare(original_or_repaired_baseline, candidate) to bound unintended change",
+        "compare(a='original_or_repaired_baseline', b='candidate', kind='shape') to bound unintended change",
     ],
     acceptance_checks=[
         "Single solid with non-zero volume.",
@@ -177,7 +177,7 @@ _OPEN_SHELL = Recipe(
     acceptance_checks=[
         "validate() reports exactly one watertight solid.",
         "Feature recognizers show the edited feature changed and adjacent holes/bores remain continuous.",
-        "shape_compare() localizes the change to the requested region.",
+        "compare(a='before', b='candidate', kind='shape') localizes the change to the requested region.",
     ],
     stop_conditions=[
         "If the no-cutter variant fills a bore, discard it.",
@@ -237,7 +237,7 @@ _SPLIT_BORED_BOSS = Recipe(
         "The boss length/depth changes by the requested delta along the measured axis.",
         "The central bore diameter and continuity are preserved through the new length.",
         "The final shape is one valid solid; no open edges and no disjoint extension solid.",
-        "shape_compare() shows changes localized to the boss and any documented inherited repair.",
+        "compare(a='before', b='candidate', kind='shape') shows changes localized to the boss and any documented inherited repair.",
     ],
     stop_conditions=[
         "If the candidate fills the bore, discard it.",
@@ -377,7 +377,7 @@ def repair_advice(error_text: str = "", goal: str = "", context: str = "") -> st
             "locate_gate_defects(object_name) if the gate fails",
             "execute(code) to implement exactly one candidate recipe",
             "export(path, 'step', object_name=...) to verify the written STEP",
-            "shape_compare(baseline, candidate) when preserving surrounding geometry matters",
+            "compare(a='baseline', b='candidate', kind='shape') when preserving surrounding geometry matters",
         ],
         "markdown": _markdown(recipe_ids),
     }

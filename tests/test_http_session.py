@@ -16,6 +16,8 @@ HTTP server.
 import contextvars
 import threading
 
+import pytest
+
 from build123d_mcp import server
 
 
@@ -131,3 +133,23 @@ def test_fastmcp_is_stateless_http():
     embedder's headers, not MCP session IDs) — pin that the server is built
     that way so the ASGI hook stays embeddable."""
     assert server.mcp.settings.stateless_http is True
+
+
+def test_compare_missing_support_error_does_not_mask_internal_attribute_errors():
+    """Only a missing compare method should produce the compatibility error."""
+    state = _set_singleton(object())
+    try:
+        assert "does not support compare" in server.compare(a="part")
+    finally:
+        _restore_singleton(state)
+
+    class BrokenCompare:
+        def compare(self, *args, **kwargs):
+            raise AttributeError("internal compare failure")
+
+    state = _set_singleton(BrokenCompare())
+    try:
+        with pytest.raises(AttributeError, match="internal compare failure"):
+            server.compare(a="part")
+    finally:
+        _restore_singleton(state)

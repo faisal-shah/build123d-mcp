@@ -888,7 +888,7 @@ def test_mcp_lists_all_tools():
         "reset",
         "save_snapshot",
         "restore_snapshot",
-        "diff_snapshot",
+        "compare",
         # search_library / load_part auto-hide with no --library (#367); this server
         # runs without one. test_mcp_library_tools_present_with_library covers the on path.
         "workflow_hints",
@@ -896,18 +896,15 @@ def test_mcp_lists_all_tools():
         "health_check",
         "version",
         "last_error",
-        "shape_compare",
         "repair_hints",
         "repair_advice",
         "import_cad_file",
         "cross_sections",
-        "clearance",
         "inspect_drawing",
         "view_axes",
         "lint_drawing",
         "render_drawing",
         "save_drawing_annotations",
-        "align_check",
         "find_holes",
         "find_bosses",
         "find_bored_bosses",
@@ -1103,8 +1100,8 @@ def test_mcp_multi_format_export(tmp_path):
 
 
 @_skip_mcp_on_win
-def test_mcp_volume_and_clearance():
-    """volume and clearance round-trip through the MCP wire."""
+def test_mcp_volume_and_compare_fit():
+    """volume and fit comparison round-trip through the MCP wire."""
 
     async def run(mcp):
         await mcp.call_tool(
@@ -1118,12 +1115,53 @@ def test_mcp_volume_and_clearance():
             },
         )
         r_vol = await mcp.call_tool("measure", {"object_name": "a"})
-        r_cl = await mcp.call_tool("clearance", {"object_a": "a", "object_b": "b"})
+        r_cl = await mcp.call_tool("compare", {"a": "a", "b": "b", "kind": "fit"})
         return r_vol.content[0].text, r_cl.content[0].text
 
     vol_json, cl_json = asyncio.run(_mcp_session(run))
     assert abs(json.loads(vol_json)["volume"] - 1000) < 1
     assert abs(json.loads(cl_json)["clearance"] - 5) < 0.1
+
+
+@_skip_mcp_on_win
+def test_mcp_compare_shape():
+    """shape comparison round-trips through the unified MCP compare tool."""
+
+    async def run(mcp):
+        await mcp.call_tool(
+            "execute",
+            {
+                "code": "from build123d import *\nshow(Box(10, 10, 10), 'small')\nshow(Box(20, 20, 20), 'large')"
+            },
+        )
+        result = await mcp.call_tool("compare", {"a": "small", "b": "large", "kind": "shape"})
+        return result.content[0].text
+
+    data = json.loads(asyncio.run(_mcp_session(run)))
+    assert abs(data["a"]["volume"] - 1000) < 1
+    assert abs(data["b"]["volume"] - 8000) < 1
+    assert abs(data["delta"]["volume"] - 7000) < 1
+
+
+@_skip_mcp_on_win
+def test_mcp_compare_snapshot_json():
+    """snapshot comparison round-trips through the unified MCP compare tool."""
+
+    async def run(mcp):
+        await mcp.call_tool(
+            "execute", {"code": "from build123d import *\nresult = Box(10, 10, 10)"}
+        )
+        await mcp.call_tool("save_snapshot", {"name": "before"})
+        await mcp.call_tool("execute", {"code": "result = Box(20, 20, 20)"})
+        result = await mcp.call_tool(
+            "compare", {"a": "before", "kind": "snapshot", "format": "json"}
+        )
+        return result.content[0].text
+
+    data = json.loads(asyncio.run(_mcp_session(run)))
+    assert data["a"]["label"] == "before"
+    assert data["b"]["label"] == "current"
+    assert data["b"]["current_shape"]["volume"] > data["a"]["current_shape"]["volume"]
 
 
 @_skip_mcp_on_win
