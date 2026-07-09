@@ -86,7 +86,12 @@ Finish by running `design_audit()` (Step 6) to prove the parameters are robust.
 `execute()` and return real Python objects, so filter and compute in code instead of
 reading a number out of one tool result and re-typing it into the next call:
 `measure(part)["volume"]`, `[h for h in find_holes(part) if h.location[0] < 5]`,
-`clearance(a, b)["clearance"]`, `align_check(a, b)["delta"]`. Also available:
+`clearance(a, b)["clearance"]`, `align_check(a, b)["delta"]`. These are
+in-`execute()` Python helpers for composing checks in code. For standalone MCP
+tool calls, use `compare(a="before", b="after", kind="shape")`,
+`compare(a="part", b="mate", kind="fit")`,
+`compare(a="a", b="b", kind="align")`, or
+`compare(a="snapshot_name", kind="snapshot")` instead of separate comparison verbs. Also available:
 `cross_sections`, `find_bosses`, `find_countersinks`, `find_hole_patterns`. They take a
 shape (default: current shape); `measure`/`clearance`/`cross_sections` stay bounded on
 large shapes. The standalone MCP tools remain for one-shot queries.
@@ -103,12 +108,15 @@ large shapes. The standalone MCP tools remain for one-shot queries.
 - Render only after `measure()` agrees with the spec:
   `render_view(save_to="/tmp/part.png")`, then show /tmp/part.png to the user.
   Use `clip_plane`/`clip_at` to reveal internal features.
-- Assemblies: `clearance("a", "b")` for fit (apart / touching / containing /
-  interpenetrating, with volumes), `align_check()` for flush/concentric checks,
-  and connect parts with Joints (RigidJoint / RevoluteJoint / …) rather than
+- Assemblies: use the MCP `compare(a="a", b="b", kind="fit")` tool for fit
+  (apart / touching / containing / interpenetrating, with volumes), and
+  `compare(a="a", b="b", kind="align", axis="Z", mode="flush")` for
+  flush/concentric checks. Inside `execute()`, the lower-level Python helpers
+  `clearance(a, b)` and `align_check(a, b)` remain available for branching in
+  code. Connect parts with Joints (RigidJoint / RevoluteJoint / …) rather than
   raw `.move()` — see `build123d://quickref`.
 - Editing an imported reference: after changing a part loaded with
-  `import_cad_file()`, `shape_compare("input", "edited")` localizes *where* the
+  `import_cad_file()`, `compare(a="input", b="edited", kind="shape")` localizes *where* the
   geometry changed and reports the exact added/removed volume and surface
   displacement — confirm the changed region and magnitude match the request, and
   that the rest stayed put. A tangential move (sliding a hole) shows no region;

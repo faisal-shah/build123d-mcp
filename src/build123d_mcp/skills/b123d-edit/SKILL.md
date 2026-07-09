@@ -40,7 +40,10 @@ Classify the edit before changing code:
 - **Feature edit**: add/remove/move a hole, boss, rib, pocket, fillet, chamfer,
   counterbore, or pattern. Prefer editing the feature construction block.
 - **Assembly/edit-in-context**: move or resize one part relative to another.
-  Use `clearance()`, `align_check()`, and named objects to verify fit.
+  Use the MCP `compare()` tool with `kind="fit"` or `kind="align"` and named
+  objects to verify fit. Inside `execute()`, the lower-level Python helpers
+  `clearance(a, b)` and `align_check(a, b)` remain available for branching in
+  code.
 - **Validity edit**: change construction so the output remains manifold.
   Use `validate()`, `locate_gate_defects()`, `find_bored_bosses()`,
   `repair_advice()`, and the repair skill only for diagnostics and patterns.
@@ -131,9 +134,11 @@ Then choose the evidence that matches the edit:
 - volume changed: compare `measure()["volume"]`
 - hole changed: run `find_holes()` or `find_hole_patterns()`
 - counterbore changed: run `find_countersinks()`
-- fit changed: run `clearance(a, b)` or `align_check(a, b)`
+- fit changed: run `compare(a="a", b="b", kind="fit")` or
+  `compare(a="a", b="b", kind="align", axis="Z", mode="flush")`
 - source-level edit may be brittle: run `design_audit()`
-- shape should otherwise match a baseline: run `shape_compare("before", "edited")`
+- shape should otherwise match a baseline: run
+  `compare(a="before", b="edited", kind="shape")`
 
 `export()` is the final gate because it checks the written and re-imported STEP.
 A `validate()` pass in memory is useful but not the final acceptance proof.
@@ -192,7 +197,7 @@ clearance_diametral = 0.5
 bore_radius = shaft_radius + clearance_diametral / 2
 ```
 
-Verify with `clearance(shaft, bore_part)` or a measured section.
+Verify with `compare(a="shaft", b="bore_part", kind="fit")` or a measured section.
 
 ### Remove a Feature
 
@@ -209,7 +214,7 @@ solids, ask the MCP for a recipe before trying variants:
 repair_advice(
   error_text="<validate/export failure text>",
   goal="extend the square boss with rounded corners and central bore by 10mm",
-  context="<locate_gate_defects or shape_compare notes>"
+  context="<locate_gate_defects or compare(a='before', b='candidate', kind='shape') notes>"
 )
 ```
 

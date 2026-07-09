@@ -37,6 +37,19 @@ def test_align_check_routes_to_worker(ws):
     assert abs(result["delta"] + 1.0) < 1e-6
 
 
+def test_compare_align_routes_to_worker(ws):
+    result = json.loads(ws.compare("a", "b", kind="align", axis="Z", mode="center"))
+    assert "error" not in result
+    assert result["object_a"] == "a"
+    assert abs(result["delta"] + 1.0) < 1e-6
+
+
+def test_compare_fit_routes_to_worker(ws):
+    result = json.loads(ws.compare("a", "b", kind="fit"))
+    assert "error" not in result
+    assert "status" in result
+
+
 def test_resolve_routes_to_worker(ws):
     result = json.loads(ws.resolve("a", ".faces().sort_by(Axis.Z)[-1]"))
     assert "error" not in result

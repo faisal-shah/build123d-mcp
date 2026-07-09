@@ -262,7 +262,7 @@ title = Location((9, 14.5, 0)) * Text(
     font_size=1.3, align=(Align.CENTER, Align.CENTER),
 )
 subtitle = Location((9, 13.0, 0)) * Text(
-    "verified by clearance() — wall 2.0mm",
+    "verified by compare fit — wall 2.0mm",
     font_size=0.8, align=(Align.CENTER, Align.CENTER),
 )
 

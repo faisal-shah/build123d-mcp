@@ -21,6 +21,7 @@ containment and no operation timeouts.
 
 import functools
 import inspect
+import json
 import multiprocessing
 import threading
 from collections.abc import Callable
@@ -813,6 +814,41 @@ class WorkerSession:
     @_op(_tool(f"{_T}.shape_compare:shape_compare"), _export_budget)
     def shape_compare(self, object_a: str, object_b: str) -> str:
         raise NotImplementedError
+
+    def compare(
+        self,
+        a: str,
+        b: str = "",
+        kind: str = "shape",
+        axis: str = "Z",
+        mode: str = "flush",
+        format: str = "text",
+    ) -> str:
+        """Unified comparison router for the public MCP tool surface.
+
+        The worker keeps the lower-level operations as implementation details;
+        this method gives server.compare() one place to dispatch by comparison
+        intent without advertising separate MCP verbs.
+        """
+        kind_norm = kind.strip().lower()
+        if kind_norm == "shape":
+            if not b:
+                return json.dumps({"error": "compare(kind='shape') requires b."}, indent=2)
+            return self.shape_compare(a, b)
+        if kind_norm == "fit":
+            if not b:
+                return json.dumps({"error": "compare(kind='fit') requires b."}, indent=2)
+            return self.clearance(a, b)
+        if kind_norm == "align":
+            if not b:
+                return json.dumps({"error": "compare(kind='align') requires b."}, indent=2)
+            return self.align_check(a, b, axis=axis, mode=mode)
+        if kind_norm == "snapshot":
+            return self.diff_snapshot(a, b, format=format)
+        return json.dumps(
+            {"error": (f"Unknown compare kind '{kind}'. Use one of: shape, fit, align, snapshot.")},
+            indent=2,
+        )
 
     @_op(_tool(f"{_T}.import_step:import_cad_file"), _import_cad_budget)
     def import_cad_file(self, path: str, name: str = "") -> str:

@@ -261,7 +261,7 @@ build123d-mcp gives an assistant tools to:
 - Render PNG, SVG, and DXF previews
 - Measure volume, area, bounding boxes, topology, and centers of mass
 - Find holes, bosses, countersinks, and hole patterns
-- Check printability, clearances, alignment, and export validity
+- Check printability, fit/alignment comparisons, and export validity
 - Import STEP/STL files for comparison
 - Export STEP, STL, DXF, SVG, or multiple formats at once
 - Save and restore session snapshots

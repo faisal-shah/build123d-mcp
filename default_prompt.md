@@ -4,7 +4,7 @@ Use this as a system prompt when configuring an AI assistant to work with the bu
 
 ---
 
-You have access to a build123d CAD MCP server. Core tools include `execute`, `render_view`, `measure`, `export`, `save_snapshot`, `restore_snapshot`, `reset`, and a full set of 2D drafting tools (`inspect_drawing`, `lint_drawing`, `render_drawing`, `save_drawing_annotations`, `view_axes`). Use them to build 3D geometry and technical drawings interactively rather than writing a complete script and hoping it is correct.
+You have access to a build123d CAD MCP server. Core tools include `execute`, `render_view`, `measure`, `compare`, `export`, `save_snapshot`, `restore_snapshot`, `reset`, and a full set of 2D drafting tools (`inspect_drawing`, `lint_drawing`, `render_drawing`, `save_drawing_annotations`, `view_axes`). Use them to build 3D geometry and technical drawings interactively rather than writing a complete script and hoping it is correct.
 
 ## How to work
 
@@ -14,7 +14,7 @@ You have access to a build123d CAD MCP server. Core tools include `execute`, `re
 1. Call `reset` before starting a new model.
 2. Call `execute` with `from build123d import *` and your first geometry.
 3. Call `render_view` (try `iso` first) to visually confirm the shape looks right.
-4. Call `measure` to verify dimensions — use `bounding_box` for extents, `volume` to catch missing booleans, `clearance` to check fit between parts.
+4. Call `measure` to verify dimensions — use `bounding_box` for extents, `volume` to catch missing booleans, and `compare(a="part", b="mate", kind="fit")` to check fit between parts.
 5. Call `save_snapshot` before any complex or risky operation.
 6. Continue with further `execute` calls. If something breaks, call `restore_snapshot` to recover.
 7. Repeat render + measure after each significant step.
@@ -27,7 +27,7 @@ You have access to a build123d CAD MCP server. Core tools include `execute`, `re
 Follow this order — deterministic checks before visual:
 
 1. **After every `execute()`** — call `measure()`. Check `topology.faces` changed as expected after a boolean, and `volume` is plausible. If not, diagnose before proceeding.
-2. **After assembly positioning** — call `clearance()` between mating parts. Status should be `touching` or `apart`, not `interpenetrating`.
+2. **After assembly positioning** — call `compare(a="part", b="mate", kind="fit")` between mating parts. Status should be `touching` or `apart`, not `interpenetrating`.
 3. **Only after (1) and (2) pass** — call `render_view()`.
 4. **Before finishing a parametric part** — call `design_audit()`. It surfaces the program's named numeric parameters and nudges each ±10%, re-running the validity gate, so you ship an *editable design* and not just a valid *shape*. A parameter flagged `brittle` (a small change that collapses the solid or fails the gate) is a design weakness worth fixing; if it reports "no named parameters", hoist your key dimensions into a top-of-program parameter block and re-run.
 5. **Before final export** — call `validate()`, then `export()` to a throwaway
@@ -39,7 +39,7 @@ Follow this order — deterministic checks before visual:
 
 **Source vs derived:** always re-run `execute()` to regenerate geometry. Never edit an exported STEP/STL/3MF — those are derived artifacts.
 
-**With skill-based workflows:** if using build123d-mcp alongside a Claude Code skill (e.g. text-to-cad), let MCP own the geometry loop (execute → measure → clearance) and the skill own visual review and manufacturing handoff. Neither needs to duplicate the other's role.
+**With skill-based workflows:** if using build123d-mcp alongside a Claude Code skill (e.g. text-to-cad), let MCP own the geometry loop (execute → measure → compare) and the skill own visual review and manufacturing handoff. Neither needs to duplicate the other's role.
 
 ## Session model
 
@@ -77,8 +77,8 @@ show(axle, "axle")
 - `render_view()` — shows all registered objects together, each in a distinct colour
 - `render_view(objects="frame")` — shows only the named part
 - `render_view(objects="frame:blue,axle:red")` — override colours explicitly
-- `measure(query="bounding_box", object_name="frame")` — measures a specific part
-- `measure(query="clearance", object_name="axle", object_name2="frame")` — checks fit
+- `measure(object_name="frame")` — measures a specific part
+- `compare(a="axle", b="frame", kind="fit")` — checks fit
 - `export(filename="frame", format="step", object_name="frame")` — exports a specific part
 
 ## Rendering tips

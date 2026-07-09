@@ -1,4 +1,5 @@
 import contextvars
+import json
 import sys
 
 from mcp.server.fastmcp import FastMCP
@@ -15,8 +16,8 @@ B", "make a drawing of X" — instead of writing standalone Python scripts run
 via the shell. The server keeps a persistent build123d session, so you can
 build incrementally with execute(), verify each step numerically with measure()
 (volume, bounding box, face inventory), inspect visually with render_view(),
-check fits with clearance(), and undo experiments with snapshots — a feedback
-loop a one-shot script cannot give.
+compare shapes/fits/snapshots with compare(), and undo experiments with
+snapshots — a feedback loop a one-shot script cannot give.
 
 Quick start: execute("from build123d import *"), build in small steps,
 register parts with show(part, "name"), measure() after every boolean,
@@ -152,7 +153,7 @@ def http_app():
 
 @mcp.tool(annotations=_MUTATING)
 def execute(code: str) -> str:
-    """Execute build123d Python code in the persistent session. Errors include automatic fix hints — read them before retrying. Use show(shape, name) to register named objects (name defaults to 'shape'); show() immediately prints volume and face count confirming the shape is non-empty. After any boolean operation (-, +, &) call measure() to confirm it succeeded (check topology.faces). named_face(shape, name) is a built-in helper: named_face(box, 'top') returns the highest-Z face, 'bottom'/'front'/'back'/'left'/'right' work similarly. find_edges(shape, geom='circle', radius=4.25, at_z=10.2, length=None, tol=0.05) filters edges for fillet/chamfer selection and prints what matched. Analysis primitives are callable IN code and return real Python objects so you compose (filter, do arithmetic) instead of copying numbers out of a tool result: measure(shape) -> dict (measure(part)['volume']), clearance(a, b) -> dict, cross_sections(shape) -> list of {position,area}, find_holes(shape) -> hole records with .location (an (x,y,z) tuple), .diameter, .depth, … ([h for h in find_holes(part) if h.location[0] < 5]); find_bosses(shape) / find_bored_bosses(shape) / find_countersinks(shape) / find_hole_patterns(shape) return recogniser records too; align_check(a, b, axis='Z', mode='flush') -> dict (align_check(a,b)['delta'] is a float). shape defaults to the current shape, and measure/clearance/cross_sections stay bounded on large shapes. save_json(name, obj) writes structured analysis data (face inventories, hole tables) to a server scratch file and returns its path — use it instead of printing large results; open()/os stay blocked."""
+    """Execute build123d Python code in the persistent session. Errors include automatic fix hints — read them before retrying. Use show(shape, name) to register named objects (name defaults to 'shape'); show() immediately prints volume and face count confirming the shape is non-empty. After any boolean operation (-, +, &) call measure() to confirm it succeeded (check topology.faces). named_face(shape, name) is a built-in helper: named_face(box, 'top') returns the highest-Z face, 'bottom'/'front'/'back'/'left'/'right' work similarly. find_edges(shape, geom='circle', radius=4.25, at_z=10.2, length=None, tol=0.05) filters edges for fillet/chamfer selection and prints what matched. Analysis primitives are callable INSIDE this execute() code and return real Python objects so you compose (filter, do arithmetic) instead of copying numbers out of a tool result: measure(shape) -> dict (measure(part)['volume']), clearance(a, b) -> dict, cross_sections(shape) -> list of {position,area}, find_holes(shape) -> hole records with .location (an (x,y,z) tuple), .diameter, .depth, … ([h for h in find_holes(part) if h.location[0] < 5]); find_bosses(shape) / find_bored_bosses(shape) / find_countersinks(shape) / find_hole_patterns(shape) return recogniser records too; align_check(a, b, axis='Z', mode='flush') -> dict (align_check(a,b)['delta'] is a float). For standalone MCP comparison calls, use compare(a='axle', b='frame', kind='fit'), compare(a='a', b='b', kind='align'), compare(a='before', b='after', kind='shape'), or compare(a='before', kind='snapshot'). shape defaults to the current shape, and measure/clearance/cross_sections stay bounded on large shapes. save_json(name, obj) writes structured analysis data (face inventories, hole tables) to a server scratch file and returns its path — use it instead of printing large results; open()/os stay blocked."""
     from build123d_mcp.tools.execute import execute_code
 
     result = execute_code(_resolve_session(), code)
@@ -293,12 +294,6 @@ def apply_tool_visibility(
             mcp.remove_tool(name)
         except Exception:  # noqa: BLE001 - tolerate an already-absent tool
             pass
-
-
-@mcp.tool(annotations=_READ_ONLY)
-def clearance(object_a: str, object_b: str) -> str:
-    """Spatial relationship between two named shapes. Returns JSON with `clearance` (mm), `status` (one of: apart, touching, containing, interpenetrating), `containment` (a_in_b, b_in_a, or neither), and `intersection_volume` / `a_volume_outside_b` / `b_volume_outside_a` for overlap quantification. Reads `clearance` differently per status: apart=gap, containing=wall thickness from inner surface to outer hull (use this to verify a pocket fits inside a plate), touching=0, interpenetrating=0 (check intersection_volume + a_volume_outside_b for the wall-piercing case). object_a, object_b: names from show()."""
-    return _resolve_session().clearance(object_a, object_b)
 
 
 @mcp.tool(annotations=_READ_ONLY)
@@ -537,12 +532,6 @@ def restore_snapshot(name: str) -> str:
 
 
 @mcp.tool(annotations=_READ_ONLY)
-def diff_snapshot(snapshot_a: str, snapshot_b: str = "", format: str = "text") -> str:
-    """Compare two snapshots by geometry metrics (volume, topology, bounding box). snapshot_b defaults to current session state if omitted. format: 'text' (default, human-readable) or 'json' (structured, for programmatic consumption)."""
-    return _resolve_session().diff_snapshot(snapshot_a, snapshot_b, format)
-
-
-@mcp.tool(annotations=_READ_ONLY)
 def session_state() -> str:
     """Return a structured JSON snapshot of the current session: current_shape metrics, all named objects (replaces list_objects) with geometry stats, snapshot names, and a variables summary of the Python namespace (type + volume for shapes, type + length for collections, type + value for scalars). Use this to orient after a reset, restore, or multi-step build to confirm what geometry and variables are active."""
     return _resolve_session().session_state()
@@ -563,9 +552,42 @@ def reset() -> str:
 
 
 @mcp.tool(annotations=_READ_ONLY)
-def shape_compare(object_a: str, object_b: str) -> str:
-    """Compare two named shapes (from show()) by geometry metrics plus localized surface deviation. Keeps volume, bbox, topology, and center deltas, and adds a bounded surface diff that locates WHERE the geometry changed: max_deviation (largest real change, noise-floored so a no-op reads ~0), changed region(s) (centroid/bbox + exact added_volume/removed_volume), magnitude_method (exact_boolean = exact displacement+volumes; exact_volume_mesh_displacement = exact volumes, mesh-estimated displacement, e.g. a cut/flush-fill; mesh_estimate = boolean skipped/failed), and unchanged_elsewhere. The exact B-rep boolean is clipped to the changed region and runs subprocess-bounded, falling back to the flagged mesh estimate on large/spread edits. For editing, this is model↔input verification, not a score: confirm the changed region(s) and add/remove volumes match the request and unrelated regions stayed put. A tangential move (sliding a hole) or a sub-resolution edit on a very large part yields no region — unchanged_elsewhere then means "no change above the detection floor", not a guarantee; cross-check volume/bbox/center deltas and find_holes."""
-    return _resolve_session().shape_compare(object_a, object_b)
+def compare(
+    a: str,
+    b: str = "",
+    kind: str = "shape",
+    axis: str = "Z",
+    mode: str = "flush",
+    format: str = "text",
+) -> str:
+    """Unified comparison tool.
+
+    kind='shape' compares two named shapes from show(), a and b, by
+    volume/bbox/topology and localized surface deviation; b is required.
+
+    kind='fit' reports the spatial relationship between two named shapes, a and b:
+    clearance, apart/touching/containing/interpenetrating status, containment,
+    and overlap volumes; b is required.
+
+    kind='align' checks two named shapes, a and b, along one axis. axis: X, Y, or Z.
+    mode: flush (bbox extreme offset), center (centroid offset), or clearance
+    (nearest-face gap); b is required.
+
+    kind='snapshot' compares snapshot a against the current session state
+    or b as a second snapshot. format: 'text' or 'json'.
+    """
+    session = _resolve_session()
+    compare_fn = getattr(session, "compare", None)
+    if compare_fn is None:
+        return json.dumps({"error": "Active session does not support compare()."}, indent=2)
+    return compare_fn(
+        a,
+        b,
+        kind=kind,
+        axis=axis,
+        mode=mode,
+        format=format,
+    )
 
 
 @mcp.tool(annotations=_READ_ONLY)
@@ -598,12 +620,6 @@ def find_countersinks(object_name: str = "") -> str:
     return _resolve_session().find_countersinks(object_name)
 
 
-@mcp.tool(annotations=_READ_ONLY)
-def align_check(object_a: str, object_b: str, axis: str = "Z", mode: str = "flush") -> str:
-    """Check alignment between two named objects along an axis. axis: X, Y, or Z. mode: flush (signed distance between bbox extremes — positive=A extends further), center (offset between bbox centroids), clearance (gap between nearest faces — positive=apart, negative=overlap). Returns JSON: {delta, axis, mode, object_a, object_b, interpretation}."""
-    return _resolve_session().align_check(object_a, object_b, axis=axis, mode=mode)
-
-
 # not read-only: with the optional label= arg it stores the descriptor in
 # session.geometry_refs (persistent, cleared by reset(), shown in session_state()).
 # Idempotent — the same label overwrites.
@@ -621,7 +637,7 @@ def script(save_to: str = "") -> str:
 
 @mcp.tool(annotations=_MUTATING)
 def import_cad_file(path: str, name: str = "") -> str:
-    """Import a STEP (.step/.stp) or STL (.stl) file as a named object in the session. path: absolute or relative path to the file. name: name to register the shape under (defaults to the filename stem). The shape becomes both the named object and the current_shape. Returns volume, topology, and bounding box of the imported shape. After importing, use render_view() to visualise the shape, measure() for geometry queries, or shape_compare() to diff against a show() object. Note: STL imports produce a shell (volume=0) rather than a solid — render_view and measure still work, but clearance() and boolean operations require a solid. If you have both the original built shape and an imported copy in session.objects, render the imported one by name (e.g. objects='mypart') to avoid Z-fighting artifacts from two co-located shapes."""
+    """Import a STEP (.step/.stp) or STL (.stl) file as a named object in the session. path: absolute or relative path to the file. name: name to register the shape under (defaults to the filename stem). The shape becomes both the named object and the current_shape. Returns volume, topology, and bounding box of the imported shape. After importing, use render_view() to visualise the shape, measure() for geometry queries, or compare(a='imported', b='model', kind='shape') to diff against a show() object. Note: STL imports produce a shell (volume=0) rather than a solid — render_view and measure still work, but fit comparisons and boolean operations require a solid. If you have both the original built shape and an imported copy in session.objects, render the imported one by name (e.g. objects='mypart') to avoid Z-fighting artifacts from two co-located shapes."""
     result = _resolve_session().import_cad_file(path, name)
     _publish_deltas()
     return result
@@ -637,7 +653,7 @@ def repair_hints(error_text: str) -> str:
 
 @mcp.tool(annotations=_READ_ONLY)
 def repair_advice(error_text: str = "", goal: str = "", context: str = "") -> str:
-    """Return structured, field-proven repair/edit recipes for an agent to implement explicitly in execute(). Unlike repair_hints(), which gives short error-specific tips, this emits a sequenced plan with code-pattern names, acceptance checks, and stop conditions. Provide the full validate()/export()/last_error() text as error_text, the intended edit as goal, and any extra notes from locate_gate_defects()/shape_compare() as context. The tool is read-only and does not mutate geometry."""
+    """Return structured, field-proven repair/edit recipes for an agent to implement explicitly in execute(). Unlike repair_hints(), which gives short error-specific tips, this emits a sequenced plan with code-pattern names, acceptance checks, and stop conditions. Provide the full validate()/export()/last_error() text as error_text, the intended edit as goal, and any extra notes from locate_gate_defects()/compare(a='before', b='after', kind='shape') as context. The tool is read-only and does not mutate geometry."""
     from build123d_mcp.tools.repair_advice import repair_advice as _repair_advice
 
     return _repair_advice(error_text=error_text, goal=goal, context=context)
@@ -676,10 +692,13 @@ BUILD123D-MCP WORKFLOW GUIDE
    Numbers are unambiguous; renders can look correct even when the geometry is wrong.
    Recommended order: execute → measure → render_view (if you need to see it).
    Compose in code: measure/clearance/cross_sections/find_holes/find_bosses/
-   find_bored_bosses/find_countersinks/find_hole_patterns/align_check are callable INSIDE execute() and
+   find_bored_bosses/find_countersinks/find_hole_patterns/align_check are Python helpers callable INSIDE execute() and
    return real objects — measure(part)["volume"], [h for h in find_holes(part) if
    h.location[0] < 5] — so filter/compute in code instead of copying numbers out of a
-   JSON tool result. The standalone tools remain for one-shot queries.
+   JSON tool result. For standalone MCP fit/alignment/shape/snapshot comparisons,
+   use compare(a="part", b="mate", kind="fit"),
+   compare(a="a", b="b", kind="align"), compare(a="before", b="after", kind="shape"),
+   or compare(a="before", kind="snapshot").
 
 3. VERIFY BOOLEAN OPERATIONS WITH TOPOLOGY
    After any cut, union, or intersection, call measure() and check topology.faces.
@@ -700,13 +719,13 @@ BUILD123D-MCP WORKFLOW GUIDE
 6. CHECKPOINT BEFORE EXPERIMENTS — AND PROPOSALS
    Call save_snapshot("name") before any operation you might want to undo.
    Snapshots are instant. restore_snapshot("name") reverts geometry without re-running code.
-   Use diff_snapshot("name") to see what changed; pass format="json" for structured output.
+   Use compare(a="name", kind="snapshot") to see what changed; pass format="json" for structured output.
 
    "What if?" proposals: when asked to evaluate a possible modification (add a hole here,
    widen this slot, swap this part), the right pattern is:
        save_snapshot("before")   # cheap; geometry-only
        <apply the proposed change via execute()>
-       <run analyses: measure(), clearance(), cross_sections(), render_view()>
+       <run analyses: measure(), compare(a="part", b="mate", kind="fit"), cross_sections(), render_view()>
        restore_snapshot("before")  # canonical model untouched
    Use this instead of redrawing the geometry in matplotlib or editing the source file.
    The 3D mutation + 3D analysis loop is cheaper than re-deriving geometry by hand,
@@ -776,8 +795,8 @@ BUILD123D-MCP WORKFLOW GUIDE
    After import_cad_file(), the shape is a named object — use render_view(objects="name")
    to visualise it. If the session also contains the original built shape at the same
    position, always render by name to avoid Z-fighting (striped colour artifacts).
-   STL imports produce a shell (volume=0); render_view and measure work, but clearance()
-   and boolean operations require a solid.
+   STL imports produce a shell (volume=0); render_view and measure work, but
+   compare(a="stl", b="solid", kind="fit") and boolean operations require a solid.
 
 12. ASSEMBLIES — USE JOINTS, NOT JUST .move()
    For assemblies of two or more parts that have a real mechanical relationship
@@ -1029,7 +1048,7 @@ Workflow:
 6. Call render_view() only after measure() confirms the geometry is correct.
 7. Call save_snapshot("name") before any experiment you might want to undo.
    For "what if?" proposals (add a hole, modify a feature) use the snapshot+restore loop:
-   save_snapshot → mutate via execute → run analyses (measure/clearance/render_view) → restore_snapshot.
+   save_snapshot → mutate via execute → run analyses (measure/compare/render_view) → restore_snapshot.
    This is cheaper and more accurate than redrawing geometry in matplotlib to evaluate a change.
 8. For assemblies of two or more parts with a mechanical relationship (mounted, hinged, sliding),
    use Joints (RigidJoint/RevoluteJoint/LinearJoint/CylindricalJoint/BallJoint) rather than raw
