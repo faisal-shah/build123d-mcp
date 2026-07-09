@@ -10,7 +10,12 @@ import json
 import pytest
 
 from build123d_mcp.session import Session
-from build123d_mcp.tools.find_features import find_bosses, find_hole_patterns, find_holes
+from build123d_mcp.tools.find_features import (
+    find_bored_bosses,
+    find_bosses,
+    find_hole_patterns,
+    find_holes,
+)
 
 
 @pytest.fixture
@@ -59,10 +64,75 @@ def test_find_bosses(session):
     assert boss["location"] == [0.0, 0.0, 13.0]
 
 
+def test_find_bored_bosses_reports_cap_evidence(session):
+    session.execute(
+        "p = Box(40, 40, 8)\n"
+        "boss = Pos(25, 0, 0) * Box(10, 20, 16)\n"
+        "bore = Pos(25, 0, 0) * Rot(0, 90, 0) * Cylinder(3, 24)\n"
+        "p = p + boss - bore\n"
+        "show(p, 'bored')"
+    )
+
+    r = json.loads(find_bored_bosses(session, "bored"))
+    assert r["count"] == 1
+    (candidate,) = r["candidates"]
+    assert candidate["bore_diameter"] == pytest.approx(6.0)
+    assert candidate["axis_into_part"][0] == pytest.approx(-1.0)
+    assert candidate["outward_axis"][0] == pytest.approx(1.0)
+    assert candidate["cap_face_count"] == 1
+    assert candidate["opening_on_outer_envelope"] is True
+    assert "re-cut the bore continuously" in candidate["construction_advice"]
+
+
+def test_find_bored_bosses_flags_split_cap_front(session):
+    session.execute(
+        "p = Box(40, 40, 8)\n"
+        "boss = Pos(25, 0, 0) * Box(10, 20, 16)\n"
+        "bore = Pos(25, 0, 0) * Rot(0, 90, 0) * Cylinder(3, 24)\n"
+        "slot = Pos(30.5, 0, 0) * Box(2, 4, 20)\n"
+        "p = p + boss - bore - slot\n"
+        "show(p, 'split_bored')"
+    )
+
+    r = json.loads(find_bored_bosses(session, "split_bored"))
+    assert r["count"] == 1
+    (candidate,) = r["candidates"]
+    assert candidate["is_split_cap"] is True
+    assert candidate["cap_face_count"] >= 2
+    assert "split_cap_front" in candidate["risk_flags"]
+    assert "Do not extrude one face" in candidate["construction_advice"]
+
+
+def test_find_bored_bosses_ignores_plain_drilled_plate(session):
+    session.execute("p = Box(40, 40, 8) - Cylinder(3, 12)\nshow(p, 'plate')")
+
+    assert json.loads(find_bored_bosses(session, "plate")) == {
+        "count": 0,
+        "candidates": [],
+        "selection_advice": (
+            "Treat this as a candidate table. Match against the request's visual "
+            "and dimensional qualifiers, mark plausible candidates in a render, "
+            "then measure the current boss length/depth before editing."
+        ),
+    }
+
+
+def test_find_bored_bosses_ignores_shared_plate_face_with_multiple_holes(session):
+    session.execute(
+        "p = Box(80, 40, 8)\n"
+        "p = p - Pos(-20, 0, 0) * Cylinder(3, 12)\n"
+        "p = p - Pos(20, 0, 0) * Cylinder(4, 12)\n"
+        "show(p, 'plate')"
+    )
+
+    assert json.loads(find_bored_bosses(session, "plate"))["count"] == 0
+
+
 def test_plain_box_has_no_features(session):
     session.execute("show(Box(10, 10, 10), 'box')")
     assert json.loads(find_holes(session, "box")) == {"count": 0, "holes": []}
     assert json.loads(find_bosses(session, "box")) == {"count": 0, "bosses": []}
+    assert json.loads(find_bored_bosses(session, "box"))["count"] == 0
 
 
 def test_find_hole_patterns_bolt_circle(session):
