@@ -68,8 +68,8 @@ change:
 
 - **Named parameter block at the top, with units** — `plate_thickness = 5.0  # mm`
   — never inline magic constants.
-- **Consistent construction order** — base sketch/solid → secondary features
-  (holes, ribs, pockets) → finishing (fillets, chamfers, shell).
+- **Consistent construction order** — base sketch/solid/shell or cored body →
+  secondary features (holes, ribs, pockets) → finishing (fillets, chamfers).
 - **Canonical feature idioms** so a feature name maps to the obvious construction
   pattern; reuse the same idiom for the same feature.
 - **Derive coordinates from parameters** (expressions / references / selectors),
@@ -77,6 +77,76 @@ change:
   to it. See `build123d://quickref` Pattern 3 for a worked example.
 
 Finish by running `design_audit()` (Step 6) to prove the parameters are robust.
+
+## Step 2A — Choose the body family before detailing
+
+Before adding holes, ribs, fillets or chamfers, decide the part's dominant body
+family and build that form first. Body-family correction means changing the
+primary construction strategy — shell, revolve, sweep, cored housing, drafted
+casting, open-spoke frame — not polishing a wrong mass with cosmetic blends.
+Fillets, chamfers and small detail cuts do not count as dominant-form
+correction; use them only after the main volume, voids and silhouette match.
+
+Use these recipes as generic starting points. They choose the main construction
+strategy; Step 5 and `build123d://skill/repair` remain canonical for imported
+STEP edits, topology repair and exact feature removal.
+
+- **Thin-walled open cover / tray / housing.** Build the outer envelope and inner
+  cavity as the first solids, then create the rim/flange, bosses, ribs and shallow
+  pockets. Do not approximate it as a solid block with recess lines drawn on top.
+  Common wrong-but-valid simplifications are filled cavities, missing open face,
+  bosses that become full-depth tubes, and ribs that close intended air space.
+  Check with `cross_sections()` through the wall, `measure()` for bbox/wall
+  sanity, `find_bosses()` for mounting posts, `find_holes()` for inserts/bores,
+  and clipped `render_view()` to prove the cavity is open. Keep booleans simple:
+  cut the cavity with one slightly-overlong tool, fuse bosses/ribs with small
+  overlap, then cut final holes through the fused result.
+
+- **Cored annular flange / circular housing.** Start from the central axis:
+  revolve or stack cylinders/rings for the top flange, hub and main bore, then
+  remove the under-flange relief/core before adding bolt-circle holes. Do not let
+  bolt holes imply full-depth tubes unless the drawing shows tubes; many are
+  local holes through a flange. Common failures are a solid disk where the section
+  shows an annular void, missing underside relief, and bolt-circle holes stopping
+  at the wrong depth. Check `find_hole_patterns()` for the bolt circle, `find_holes()`
+  for bore diameter/depth, `cross_sections(axis=...)` across the axis for the
+  cored profile, and `measure()` for concentric bbox/volume sanity. Prefer
+  coaxial revolve/ring construction, then subtract axial bores and local bolt
+  holes from the fused flange/hub.
+
+- **Cast gearbox / pump housing with bosses and flanges.** Build the cored main
+  housing and drafted shoulders first, then overlapping side bosses, feet, pads
+  and flanges. Do not model it as a rectangular box plus cosmetic rounded edges;
+  draft/taper and offset bores are part of the dominant form. Common failures are
+  slab-sided bodies, bosses butt-joined to faces without buried overlap, side
+  bores that miss the housing core, and feet added after holes so cuts do not
+  pass through the final fused body. Check bbox and face inventory with
+  `measure()`, side/core sections with `cross_sections()`, boss inventory with
+  `find_bosses()`, and hole axes/depths with `find_holes()`. Fuse large lobes,
+  bosses and feet with slight interpenetration before cutting shared bores and
+  through-holes; reserve cosmetic fillets for the end.
+
+- **Open spoked / ribbed / windowed casting.** Preserve air gaps as primary
+  negative space. Start with hub, rim/frame and one rib/spoke, then pattern or
+  mirror the repeated material and cut windows all the way through. Do not extrude
+  the convex outer silhouette and engrave spoke lines; that gives valid CAD with
+  the wrong topology. Common failures are closed windows, ribs fused into a plate,
+  missing central opening and inconsistent repeated angles. Check with clipped
+  `render_view()`, `cross_sections()` across the open plane, and `measure()` for
+  volume that is plausible for an open frame. Use `find_hole_patterns()` only
+  when actual holes/bolt features define the rotational pattern; it does not
+  recognize arbitrary spokes. Use one fused material set, then one window-cut set;
+  avoid many tangent cutters that only graze the rim.
+
+- **Axisymmetric stepped part.** If the side view defines most of the shape, draw
+  the half-section profile and `revolve()` it before adding plan-view holes,
+  keyways, flats or slots. Do not stack boxes/cylinders from the plan view and
+  hope fillets make the side profile correct. Common failures are square
+  shoulders where the profile is tapered, missing grooves/reliefs, and holes cut
+  before the revolved body changes diameter. Check with `cross_sections()` on the
+  axis, `measure()` for step diameters/heights, and `find_holes()` for axial or
+  radial bores. Keep the revolved base parametric, then apply secondary cuts and
+  final edge treatments.
 
 ## Step 3 — Verify numerically, then visually
 
