@@ -36,6 +36,17 @@ def test_load_raw_returns_skill_content():
 def test_load_raw_modeling_returns_skill_content():
     content = _load_raw("modeling")
     assert "Build 3D Geometry" in content
+    assert "base sketch/solid/shell or cored body" in content
+    assert "Choose the body family before detailing" in content
+    assert "build123d://skill/repair" in content
+    assert "Fillets, chamfers and small detail cuts do not count as dominant-form" in content
+    assert "correction; use them only after the main volume" in content
+    assert "Thin-walled open cover / tray / housing" in content
+    assert "Cored annular flange / circular housing" in content
+    assert "Cast gearbox / pump housing with bosses and flanges" in content
+    assert "Open spoked / ribbed / windowed casting" in content
+    assert "it does not\n  recognize arbitrary spokes" in content
+    assert "Axisymmetric stepped part" in content
     assert len(content) > 1000
 
 
