@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.78
+
+### Changed
+
+- **`b123d-modeling` skill: add body-family construction recipes for generation fidelity.** The dominant-form workflow now gives agents concrete construction patterns for axisymmetric shells, radial repeated-feature bodies, prismatic housings with pockets, sheet-metal/channel bodies, and mixed-family parts. It also makes the distinction between primary construction and finishing explicit, and reserves `find_hole_patterns()` for actual holes and bolt features rather than solid spokes or ribs.
+
 ## v0.3.77
 
 ### Changed
