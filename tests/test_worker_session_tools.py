@@ -50,6 +50,19 @@ def test_compare_fit_routes_to_worker(ws):
     assert "status" in result
 
 
+def test_inspect_part_routes_to_worker(ws):
+    result = json.loads(
+        ws.inspect_part(
+            "a",
+            section_axis="Z",
+            section_slices=3,
+            expected=json.dumps({"bbox": [1, 1, 1], "solid_count": 1}),
+        )
+    )
+    assert result["status"] == "PASS"
+    assert result["bbox"] == {"x": 1.0, "y": 1.0, "z": 1.0}
+
+
 def test_resolve_routes_to_worker(ws):
     result = json.loads(ws.resolve("a", ".faces().sort_by(Axis.Z)[-1]"))
     assert "error" not in result
